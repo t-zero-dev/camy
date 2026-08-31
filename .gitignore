@@ -1,0 +1,12 @@
+# Built helper — rebuild from helper/
+/bin/yolocam
+/bin/yolocam.new
+
+# Cargo
+**/target/
+Cargo.lock
+
+# Editor
+*.swp
+*.swo
+*~

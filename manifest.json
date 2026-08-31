@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "yolocam",
+  "name": "YoloCam S7",
+  "version": "0.1.0",
+  "author": "tunde",
+  "license": "MIT",
+  "description": "Native Omarchy configurator for the YoloCam S7 — exposure, focus, image, HDMI, audio, and a panel-open MJPEG preview.",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "YoloCam S7",
+    "description": "Control the YoloCam S7 from the bar the way YoloLiv Compose does on Windows.",
+    "category": "Devices",
+    "aliases": ["yolocam", "s7", "camera", "compose"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "hideWhenAbsent": false,
+      "preview": true
+    },
+    "schema": [
+      {
+        "key": "hideWhenAbsent",
+        "type": "boolean",
+        "label": "Hide when unplugged",
+        "defaultValue": false
+      },
+      {
+        "key": "preview",
+        "type": "boolean",
+        "label": "Live preview when the panel is open",
+        "defaultValue": true
+      }
+    ]
+  }
+}
