@@ -16,7 +16,7 @@ mod watch;
 use std::io::{self, Write};
 use std::time::Duration;
 
-use yolocam::client::Client;
+use yolocam::client::{BlockingClient, Client};
 use yolocam::discover::{self, Discovery};
 use yolocam::params::{self, Kind};
 use yolocam::pb;
@@ -101,7 +101,12 @@ fn json_ok(v: serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(m)
 }
 
-fn connect(disc: &Discovery) -> Result<Client> {
+fn connect(disc: &Discovery) -> Result<BlockingClient> {
+    let addr = format!("{}:{}", disc.camera_ip, disc.port);
+    BlockingClient::connect(&addr, Duration::from_secs(3))
+}
+
+fn connect_watch(disc: &Discovery) -> Result<Client> {
     let addr = format!("{}:{}", disc.camera_ip, disc.port);
     Client::connect(&addr, Duration::from_secs(3))
 }

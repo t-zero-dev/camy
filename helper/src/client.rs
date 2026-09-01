@@ -115,24 +115,6 @@ impl Client {
         self.flush_write()
     }
 
-    fn write_msg(&mut self, msg: &Message) -> Result<()> {
-        const PACE: Duration = Duration::from_millis(160);
-        let elapsed = self.last_rpc.elapsed();
-        if elapsed < PACE {
-            std::thread::sleep(PACE.saturating_sub(elapsed));
-        }
-        self.write_now(msg)
-    }
-
-    fn write_now(&mut self, msg: &Message) -> Result<()> {
-        let frame = wire::wrap_message(msg);
-        self.stream
-            .write_all(&frame)
-            .map_err(|e| Error::io_ctx(e, "write"))?;
-        self.last_rpc = Instant::now();
-        Ok(())
-    }
-
     pub fn begin_get(&mut self, cid: u32) -> Result<u32> {
         if self.write_pending() {
             return Err(Error::Busy);
@@ -186,15 +168,43 @@ impl Client {
             Err(e) => Err(Error::io_ctx(e, "read")),
         }
     }
+}
 
-    pub fn pump(&mut self, wait: Duration) -> Result<Vec<Message>> {
+/// Blocking CLI path. Watch uses `Client` and must not call these.
+pub struct BlockingClient {
+    inner: Client,
+}
+
+impl BlockingClient {
+    pub fn connect(addr: &str, timeout: Duration) -> Result<Self> {
+        Ok(Self {
+            inner: Client::connect(addr, timeout)?,
+        })
+    }
+
+    fn write_msg(&mut self, msg: &Message) -> Result<()> {
+        const PACE: Duration = Duration::from_millis(160);
+        let elapsed = self.inner.last_rpc.elapsed();
+        if elapsed < PACE {
+            std::thread::sleep(PACE.saturating_sub(elapsed));
+        }
+        let frame = wire::wrap_message(msg);
+        self.inner
+            .stream
+            .write_all(&frame)
+            .map_err(|e| Error::io_ctx(e, "write"))?;
+        self.inner.last_rpc = Instant::now();
+        Ok(())
+    }
+
+    fn pump(&mut self, wait: Duration) -> Result<Vec<Message>> {
         let deadline = Instant::now() + wait;
         let mut out = Vec::new();
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let slice = remaining.min(Duration::from_millis(50));
-            self.stream.set_read_timeout(Some(slice)).ok();
-            let mut msgs = self.try_read()?;
+            self.inner.stream.set_read_timeout(Some(slice)).ok();
+            let mut msgs = self.inner.try_read()?;
             out.append(&mut msgs);
             if !out.is_empty() && Instant::now() + Duration::from_millis(20) >= deadline {
                 break;
@@ -204,7 +214,7 @@ impl Client {
     }
 
     pub fn heartbeat(&mut self) -> Result<()> {
-        let seq = self.next_seq();
+        let seq = self.inner.next_seq();
         self.write_msg(&pb::set_int(seq, params::HEARTBEAT_CID, 1))
     }
 
@@ -213,7 +223,7 @@ impl Client {
     }
 
     pub fn get_within(&mut self, cid: u32, timeout: Duration) -> Result<Message> {
-        let seq = self.next_seq();
+        let seq = self.inner.next_seq();
         self.write_msg(&pb::request(seq, cid))?;
         let deadline = Instant::now() + timeout;
         loop {
@@ -222,7 +232,7 @@ impl Client {
                 return Err(Error::Timeout { cid: Some(cid) });
             }
             for msg in self.pump(wait.min(Duration::from_millis(120)))? {
-                if msg.ty == MsgType::Response as u32 && (msg.seq == seq || msg.id == cid) {
+                if msg.is_reply_to(seq, cid) {
                     return Ok(msg);
                 }
             }
@@ -238,7 +248,7 @@ impl Client {
     }
 
     fn send_set(&mut self, mut msg: Message, fallback: pb::Body) -> Result<Message> {
-        let seq = self.next_seq();
+        let seq = self.inner.next_seq();
         msg.seq = seq;
         let cid = msg.id;
         self.write_msg(&msg)?;
@@ -247,7 +257,7 @@ impl Client {
             let wait = deadline.saturating_duration_since(Instant::now());
             if wait.is_zero() {
                 return Ok(Message {
-                    ty: MsgType::Response as u32,
+                    ty: Some(MsgType::Response),
                     seq,
                     resp_code: 0,
                     id: cid,
@@ -256,7 +266,7 @@ impl Client {
                 });
             }
             for reply in self.pump(wait.min(Duration::from_millis(200)))? {
-                if reply.ty == MsgType::Response as u32 && (reply.seq == seq || reply.id == cid) {
+                if reply.is_reply_to(seq, cid) {
                     return Ok(reply);
                 }
             }

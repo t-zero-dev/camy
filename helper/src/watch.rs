@@ -11,36 +11,57 @@ use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use yolocam::client::Client;
 use yolocam::discover::{self, Discovery};
 use yolocam::params::{self, Param};
-use yolocam::pb::{self, MsgType};
+use yolocam::pb;
 use yolocam::preview::Preview;
 use yolocam::usbwatch::PlugWatch;
 use yolocam::{Error, Result};
 
-use super::{connect, ctl_path, emit};
+use super::{connect_watch, ctl_path, emit};
 
 #[derive(Clone, Copy, Debug)]
-enum RpcBody {
-    Get,
-    SetInt(u32),
-    SetRect(pb::RectF),
+enum SetBody {
+    Int(u32),
+    Rect(pb::RectF),
 }
 
-impl RpcBody {
-    fn timeout_is_error(self) -> bool {
-        matches!(self, Self::SetInt(_))
-    }
-
+impl SetBody {
     fn set_wire(self) -> Option<u32> {
         match self {
-            Self::SetInt(w) => Some(w),
-            Self::Get | Self::SetRect(_) => None,
+            Self::Int(w) => Some(w),
+            Self::Rect(_) => None,
         }
     }
 
     fn set_rect(self) -> Option<pb::RectF> {
         match self {
-            Self::SetRect(r) => Some(r),
-            Self::Get | Self::SetInt(_) => None,
+            Self::Rect(r) => Some(r),
+            Self::Int(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RpcBody {
+    Get,
+    Set(SetBody),
+}
+
+impl RpcBody {
+    fn timeout_is_error(self) -> bool {
+        matches!(self, Self::Set(SetBody::Int(_)))
+    }
+
+    fn set_wire(self) -> Option<u32> {
+        match self {
+            Self::Set(s) => s.set_wire(),
+            Self::Get => None,
+        }
+    }
+
+    fn set_rect(self) -> Option<pb::RectF> {
+        match self {
+            Self::Set(s) => s.set_rect(),
+            Self::Get => None,
         }
     }
 }
@@ -57,7 +78,7 @@ struct Pending {
 struct QueuedSet {
     name: &'static str,
     cid: u32,
-    body: RpcBody,
+    body: SetBody,
 }
 
 struct Rpc {
@@ -105,7 +126,7 @@ struct Watch {
     last_usb_fallback: Instant,
     last_fill: Instant,
     plugs: Option<PlugWatch>,
-    usb_fallback: Duration,
+    usb_fallback: Option<Duration>,
     listener: UnixListener,
     sock_path: PathBuf,
 }
@@ -131,10 +152,12 @@ impl Watch {
 
         let client = open_client(&disc);
         let plugs = PlugWatch::new();
+        // inotify is the plug signal. Only walk sysfs on a timer if that watch
+        // could not be created.
         let usb_fallback = if plugs.is_some() {
-            Duration::from_secs(5)
+            None
         } else {
-            Duration::from_millis(800)
+            Some(Duration::from_millis(800))
         };
         Ok(Self {
             disc,
@@ -202,9 +225,10 @@ impl Watch {
     }
 
     fn tick_usb(&mut self) {
-        if self.plugs.as_ref().is_some_and(PlugWatch::changed)
-            || self.last_usb_fallback.elapsed() > self.usb_fallback
-        {
+        let fallback_due = self
+            .usb_fallback
+            .is_some_and(|gap| self.last_usb_fallback.elapsed() > gap);
+        if self.plugs.as_ref().is_some_and(PlugWatch::changed) || fallback_due {
             self.last_usb_fallback = Instant::now();
             self.rediscover();
         }
@@ -221,26 +245,60 @@ impl Watch {
     }
 
     fn tick_heartbeat(&mut self) {
-        let mut fatal = None;
-        if let Some(c) = self.client.as_mut() {
-            if self.last_beat.elapsed() > Duration::from_secs(25)
-                && c.pace_ready()
-                && self.rpc.queued.is_none()
-            {
-                match c.queue_heartbeat() {
-                    Ok(()) => self.last_beat = Instant::now(),
-                    Err(e) if e.is_transient_write() => {}
-                    Err(e) => fatal = Some(e),
+        let Some(mut c) = self.client.take() else {
+            return;
+        };
+        if self.last_beat.elapsed() > Duration::from_secs(25)
+            && c.pace_ready()
+            && self.rpc.queued.is_none()
+        {
+            match c.queue_heartbeat() {
+                Ok(()) => self.last_beat = Instant::now(),
+                Err(e) if e.is_transient_write() => {}
+                Err(e) => {
+                    drop(c);
+                    self.disconnect(&e);
+                    return;
                 }
             }
         }
-        if let Some(e) = fatal {
-            self.disconnect(&e);
+        self.client = Some(c);
+    }
+
+    fn poll_timeout(&self) -> PollTimeout {
+        // Slot files are not in the poll set. Preview display is ~15 fps, so
+        // drain at least that often while the viewfinder is on.
+        let mut wait = if self.preview.is_some() {
+            Duration::from_millis(40)
+        } else {
+            Duration::from_millis(250)
+        };
+        if let Some(p) = &self.rpc.pending {
+            wait = wait.min(
+                Duration::from_millis(400)
+                    .saturating_sub(p.started.elapsed())
+                    .max(Duration::from_millis(5)),
+            );
         }
+        if self.client.is_none() && self.disc.usb {
+            wait = wait.min(
+                Duration::from_secs(3)
+                    .saturating_sub(self.last_reconnect.elapsed())
+                    .max(Duration::from_millis(20)),
+            );
+        }
+        if self.client.is_some() && self.preview.is_none() {
+            wait = wait.min(
+                Duration::from_secs(25)
+                    .saturating_sub(self.last_beat.elapsed())
+                    .max(Duration::from_millis(20)),
+            );
+        }
+        PollTimeout::try_from(wait).unwrap_or(PollTimeout::ZERO)
     }
 
     fn poll_fds(&self, input: &impl AsFd) -> (bool, bool, bool, bool) {
-        let timeout = PollTimeout::try_from(Duration::from_millis(40)).unwrap_or(PollTimeout::ZERO);
+        let timeout = self.poll_timeout();
         let mut fds: Vec<PollFd> = Vec::with_capacity(4);
         fds.push(PollFd::new(input.as_fd(), PollFlags::POLLIN));
         fds.push(PollFd::new(self.listener.as_fd(), PollFlags::POLLIN));
@@ -270,27 +328,33 @@ impl Watch {
     }
 
     fn flush_camera(&mut self) {
-        let mut fatal = None;
-        if let Some(c) = self.client.as_mut() {
-            if c.write_pending() {
-                match c.flush_write() {
-                    Ok(()) => {}
-                    Err(e) if e.is_transient_write() => {}
-                    Err(e) => fatal = Some(e),
+        let Some(mut c) = self.client.take() else {
+            return;
+        };
+        if c.write_pending() {
+            match c.flush_write() {
+                Ok(()) => {}
+                Err(e) if e.is_transient_write() => {}
+                Err(e) => {
+                    drop(c);
+                    self.disconnect(&e);
+                    return;
                 }
             }
         }
-        if let Some(e) = fatal {
-            self.disconnect(&e);
-        }
+        self.client = Some(c);
     }
 
     fn on_camera(&mut self) {
-        let result = self.client.as_mut().map(Client::try_read);
-        match result {
-            Some(Ok(msgs)) => dispatch(&mut self.focus, &mut self.rpc.pending, msgs),
-            Some(Err(e)) => self.disconnect(&e),
-            None => {}
+        let Some(mut c) = self.client.take() else {
+            return;
+        };
+        match c.try_read() {
+            Ok(msgs) => {
+                self.client = Some(c);
+                dispatch(&mut self.focus, &mut self.rpc.pending, msgs);
+            }
+            Err(e) => self.disconnect(&e),
         }
     }
 
@@ -313,59 +377,66 @@ impl Watch {
         if self.rpc.pending.is_some() {
             return;
         }
-        let mut fatal = None;
-        if let Some(c) = self.client.as_mut() {
-            if c.pace_ready() {
-                match take_send(&mut self.rpc, &mut self.fill, self.last_fill) {
-                    Some(SendKind::Set(q)) => {
-                        let started = Instant::now();
-                        let send = match q.body {
-                            RpcBody::SetInt(wire) => Some(c.begin_set(q.cid, wire)),
-                            RpcBody::SetRect(rect) => Some(c.begin_set_rect(q.cid, rect)),
-                            RpcBody::Get => None,
-                        };
-                        if let Some(send) = send {
-                            match send {
-                            Ok(seq) => {
-                                if let Some(r) = q.body.set_rect() {
-                                    emit(serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}));
-                                    emit(serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
-                                }
-                                self.rpc.pending = Some(Pending {
-                                    seq,
-                                    name: q.name,
-                                    cid: q.cid,
-                                    started,
-                                    body: q.body,
-                                });
-                            }
-                            Err(e) if e.is_transient_write() => self.rpc.queued = Some(q),
-                            Err(e) => fatal = Some(e),
-                            }
+        let Some(mut c) = self.client.take() else {
+            return;
+        };
+        if !c.pace_ready() {
+            self.client = Some(c);
+            return;
+        }
+        let send_err = match take_send(&mut self.rpc, &mut self.fill, self.last_fill) {
+            Some(SendKind::Set(q)) => {
+                let started = Instant::now();
+                let send = match q.body {
+                    SetBody::Int(wire) => c.begin_set(q.cid, wire),
+                    SetBody::Rect(rect) => c.begin_set_rect(q.cid, rect),
+                };
+                match send {
+                    Ok(seq) => {
+                        if let Some(r) = q.body.set_rect() {
+                            emit(serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}));
+                            emit(serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
                         }
+                        self.rpc.pending = Some(Pending {
+                            seq,
+                            name: q.name,
+                            cid: q.cid,
+                            started,
+                            body: RpcBody::Set(q.body),
+                        });
+                        None
                     }
-                    Some(SendKind::Get(p)) => match c.begin_get(p.cid) {
-                        Ok(seq) => {
-                            self.fill.commit();
-                            self.last_fill = Instant::now();
-                            self.rpc.pending = Some(Pending {
-                                seq,
-                                name: p.name,
-                                cid: p.cid,
-                                started: Instant::now(),
-                                body: RpcBody::Get,
-                            });
-                        }
-                        Err(e) if e.is_transient_write() => {}
-                        Err(e) => fatal = Some(e),
-                    },
-                    None => {}
+                    Err(e) if e.is_transient_write() => {
+                        self.rpc.queued = Some(q);
+                        None
+                    }
+                    Err(e) => Some(e),
                 }
             }
-        }
-        if let Some(e) = fatal {
+            Some(SendKind::Get(p)) => match c.begin_get(p.cid) {
+                Ok(seq) => {
+                    self.fill.commit();
+                    self.last_fill = Instant::now();
+                    self.rpc.pending = Some(Pending {
+                        seq,
+                        name: p.name,
+                        cid: p.cid,
+                        started: Instant::now(),
+                        body: RpcBody::Get,
+                    });
+                    None
+                }
+                Err(e) if e.is_transient_write() => None,
+                Err(e) => Some(e),
+            },
+            None => None,
+        };
+        if let Some(e) = send_err {
+            drop(c);
             self.disconnect(&e);
+            return;
         }
+        self.client = Some(c);
     }
 
     fn on_stdin(&mut self, line: &str) {
@@ -395,6 +466,9 @@ impl Watch {
         self.client = None;
         self.rpc.clear();
         emit(serde_json::json!({"event":"disconnected","error": e.to_string()}));
+        // Power-off drops TCP first. Recheck USB so the bar can go outline
+        // instead of sitting on "USB only".
+        self.rediscover();
     }
 
     fn rediscover(&mut self) {
@@ -458,7 +532,7 @@ impl Watch {
                 self.rpc.queued = Some(QueuedSet {
                     name: p.name,
                     cid: p.cid,
-                    body: RpcBody::SetInt(wire),
+                    body: SetBody::Int(wire),
                 });
                 Ok(None)
             }
@@ -475,7 +549,7 @@ impl Watch {
                         "focus-area"
                     },
                     cid: params::FOCUS_TARGET_CID,
-                    body: RpcBody::SetRect(rect),
+                    body: SetBody::Rect(rect),
                 });
                 Ok(None)
             }
@@ -536,7 +610,7 @@ fn open_client(disc: &Discovery) -> Option<Client> {
     if !disc.usb {
         return None;
     }
-    match connect(disc) {
+    match connect_watch(disc) {
         Ok(mut c) => {
             let _ = c.set_nonblocking(true);
             let _ = c.queue_heartbeat();
@@ -553,7 +627,7 @@ fn open_client(disc: &Discovery) -> Option<Client> {
 fn dispatch(focus: &mut FocusEmit, pending: &mut Option<Pending>, msgs: Vec<pb::Message>) {
     for mut msg in msgs {
         if let Some(p) = pending.as_ref() {
-            if msg.ty == MsgType::Response as u32 && (msg.seq == p.seq || msg.id == p.cid) {
+            if msg.is_reply_to(p.seq, p.cid) {
                 let name = p.name;
                 let cid = p.cid;
                 let body = p.body;
@@ -568,7 +642,7 @@ fn dispatch(focus: &mut FocusEmit, pending: &mut Option<Pending>, msgs: Vec<pb::
                 continue;
             }
         }
-        if msg.ty == MsgType::Notify as u32 && msg.id == params::FACE_BOX_CID {
+        if msg.is_notify() && msg.id == params::FACE_BOX_CID {
             if let pb::Body::Rects(ref mut rects) = msg.body {
                 *rects = params::pick_primary_face(rects);
             }
@@ -577,18 +651,18 @@ fn dispatch(focus: &mut FocusEmit, pending: &mut Option<Pending>, msgs: Vec<pb::
             }
             continue;
         }
-        if msg.ty == MsgType::Notify as u32 && msg.id == params::FOCUS_AREA_CID {
+        if msg.is_notify() && msg.id == params::FOCUS_AREA_CID {
             if let Some(ev) = focus.event("focus-area", &msg) {
                 emit(ev);
             }
             continue;
         }
         if let Some(p) = params::find_cid(msg.id) {
-            if msg.ty != MsgType::Notify as u32 {
+            if !msg.is_notify() {
                 emit(serde_json::json!({"event":"param","name":p.name,"cid":p.cid,"resp":msg.resp_code,"value": params::body_json(&msg)}));
             }
-        } else if msg.ty != MsgType::Notify as u32 {
-            emit(serde_json::json!({"event":"raw","cid":msg.id,"type":msg.ty,"resp":msg.resp_code,"value": params::body_json(&msg)}));
+        } else if !msg.is_notify() {
+            emit(serde_json::json!({"event":"raw","cid":msg.id,"type":msg.ty.map(|t| t as u32),"resp":msg.resp_code,"value": params::body_json(&msg)}));
         }
     }
 }
@@ -776,7 +850,7 @@ fn json_norm_rect(v: &serde_json::Value) -> Result<pb::RectF> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Fill, RpcBody};
+    use super::{Fill, RpcBody, SetBody};
     use std::time::{Duration, Instant};
     use yolocam::params::{self, Kind};
 
@@ -839,7 +913,7 @@ mod tests {
         rpc.queued = Some(super::QueuedSet {
             name: "iso",
             cid: 17,
-            body: RpcBody::SetInt(200),
+            body: SetBody::Int(200),
         });
         match super::take_send(&mut rpc, &mut fill, past) {
             Some(super::SendKind::Set(q)) => assert_eq!(q.name, "iso"),
@@ -854,12 +928,12 @@ mod tests {
         rpc.queued = Some(super::QueuedSet {
             name: "iso",
             cid: 17,
-            body: RpcBody::SetInt(100),
+            body: SetBody::Int(100),
         });
         rpc.queued = Some(super::QueuedSet {
             name: "ev",
             cid: 15,
-            body: RpcBody::SetInt(8),
+            body: SetBody::Int(8),
         });
         assert_eq!(rpc.queued.unwrap().name, "ev");
     }
@@ -871,7 +945,7 @@ mod tests {
             name: "iso",
             cid: 17,
             started: Instant::now(),
-            body: RpcBody::SetInt(200),
+            body: RpcBody::Set(SetBody::Int(200)),
         };
         let ev = super::set_timeout_event(&p).expect("set timeout event");
         assert_eq!(ev["event"], "param");
@@ -886,12 +960,12 @@ mod tests {
             name: "focus-area",
             cid: 24,
             started: Instant::now(),
-            body: RpcBody::SetRect(yolocam::pb::RectF {
+            body: RpcBody::Set(SetBody::Rect(yolocam::pb::RectF {
                 x: 0.2,
                 y: 0.2,
                 w: 0.3,
                 h: 0.3,
-            }),
+            })),
         };
         assert!(super::set_timeout_event(&p).is_none());
     }
@@ -910,11 +984,13 @@ mod tests {
 
     #[test]
     fn rpc_body_flags_cannot_diverge() {
-        assert!(RpcBody::SetInt(1).timeout_is_error());
-        assert!(!RpcBody::SetRect(yolocam::pb::RectF::default()).timeout_is_error());
+        assert!(RpcBody::Set(SetBody::Int(1)).timeout_is_error());
+        assert!(!RpcBody::Set(SetBody::Rect(yolocam::pb::RectF::default())).timeout_is_error());
         assert!(!RpcBody::Get.timeout_is_error());
-        assert_eq!(RpcBody::SetInt(9).set_wire(), Some(9));
-        assert!(RpcBody::SetRect(yolocam::pb::RectF::default()).set_wire().is_none());
+        assert_eq!(RpcBody::Set(SetBody::Int(9)).set_wire(), Some(9));
+        assert!(RpcBody::Set(SetBody::Rect(yolocam::pb::RectF::default()))
+            .set_wire()
+            .is_none());
         assert!(RpcBody::Get.set_rect().is_none());
     }
 }

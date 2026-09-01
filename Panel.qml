@@ -41,9 +41,12 @@ Panel {
     ? bar.shell.serviceFor(moduleName) : null
   readonly property var service: sharedService || localService
   readonly property bool present: service.usb === true
+  readonly property string camGlyph: present ? "󰄀" : "󰵝"
   readonly property color iconColor: service.control ? Color.accent : (present ? foreground : dim)
   property bool previewShowA: true
   property bool previewReady: false
+  property string heroHoverTip: ""
+  property string focusHoverTip: ""
 
   function pushSettings() { if (service) service.settings = settings }
   onSettingsChanged: pushSettings()
@@ -136,11 +139,11 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰄀"
+    text: root.camGlyph
     active: service.control && present
     activeColor: Color.accent
     useActiveColor: true
-    dimmed: !present
+    dimmed: false
     tooltipText: !present
       ? "YoloCam S7 · unplugged"
       : service.previewBusy
@@ -191,7 +194,7 @@ Panel {
 
             Text {
               id: heroIcon
-              text: "󰄀"
+              text: root.camGlyph
               color: root.iconColor
               font.family: root.fontFamily
               font.pixelSize: Style.font.display
@@ -215,13 +218,75 @@ Panel {
                 font.bold: true
               }
 
+              Item {
+                width: parent.width
+                height: heroLine1Metrics.height
+
+                Text {
+                  id: heroLine1Metrics
+                  visible: false
+                  text: "X"
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Text {
+                  anchors.fill: parent
+                  visible: root.heroReadouts.length === 0
+                  text: heroStatus().toUpperCase()
+                  color: root.heroAlarm ? (bar ? bar.urgent : Color.urgent) : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                  verticalAlignment: Text.AlignVCenter
+                }
+
+                Row {
+                  id: heroStats
+                  anchors.fill: parent
+                  visible: root.heroReadouts.length > 0
+                  spacing: Style.space(8)
+                  Repeater {
+                    model: root.heroReadouts
+                    Row {
+                      spacing: Style.space(8)
+                      Text {
+                        visible: index > 0
+                        text: "·"
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.bodySmall
+                      }
+                      Text {
+                        text: String(modelData.label || "").toUpperCase()
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.bodySmall
+                        HoverHandler {
+                          onHoveredChanged: {
+                            if (hovered)
+                              root.heroHoverTip = String(modelData.tip || "")
+                            else if (root.heroHoverTip === String(modelData.tip || ""))
+                              root.heroHoverTip = ""
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
               Text {
                 width: parent.width
-                text: heroStatus().toUpperCase()
-                color: root.heroAlarm ? (bar ? bar.urgent : Color.urgent) : root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
+                text: root.heroReadouts.length > 0 && root.heroHoverTip !== "" ? root.heroHoverTip : " "
                 elide: Text.ElideRight
+                maximumLineCount: 1
+                wrapMode: Text.NoWrap
+                opacity: root.heroReadouts.length > 0 && root.heroHoverTip !== "" ? 1 : 0
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
               }
             }
           }
@@ -486,6 +551,9 @@ Panel {
 
   // Face: CID 59. AF-S: click target (CID 24). AF-C: size presets or a drawn box (CID 34).
   readonly property var afOverlay: {
+    var _draft = root.afDraft
+    var _local = root.localAf
+    var _custom = root.afcCustom
     if (!root.previewReady || !service.previewOn || root.tab !== "focus") return []
     return root.afRects()
   }
@@ -562,11 +630,43 @@ Panel {
     bits.push("ISO " + val("iso", "—"))
     bits.push(Model.shutterLabel(val("shutter-us", 0)))
     bits.push(Model.zoomLabel(val("zoom", 50)))
-    bits.push(Model.enumLabel([
-      { value: 1, label: "AF-S" }, { value: 2, label: "Manual" },
-      { value: 3, label: "AF-C" }, { value: 4, label: "Face" }
-    ], val("focus-mode", 4)))
+    bits.push(focusModeName(val("focus-mode", 4)))
     return bits.join(" · ")
+  }
+
+  function focusModeName(mode) {
+    var n = Number(mode)
+    if (n === 1) return "AF-S"
+    if (n === 3) return "AF-C"
+    if (n === 4) return "Face"
+    if (n === 2) return "Manual"
+    return String(mode)
+  }
+
+  function focusModeTip(mode) {
+    var n = Number(mode)
+    if (n === 1) return "Single autofocus, pick a point on the preview."
+    if (n === 3) return "Continuous autofocus. The lens keeps focusing in the area you set."
+    if (n === 4) return "Face — the camera finds a face and tracks it."
+    if (n === 2) return "Manual — you focus the lens; the camera does not autofocus."
+    return "Focus mode."
+  }
+
+  readonly property var heroReadouts: {
+    var _vals = service.values
+    var _pend = service.pending
+    if (service.applyStatus !== "") return []
+    if (service.lensCovered) return []
+    if (!present) return []
+    if (service.previewBusy) return []
+    if (!service.control) return []
+    var mode = val("focus-mode", 4)
+    return [
+      { label: "ISO " + val("iso", "—"), tip: "Sensor gain (higher is brighter and grainier)." },
+      { label: Model.shutterLabel(val("shutter-us", 0)), tip: "Shutter speed." },
+      { label: Model.zoomLabel(val("zoom", 50)), tip: "Optical zoom." },
+      { label: focusModeName(mode), tip: "Focus mode." }
+    ]
   }
 
   component EnumRow: Column {
@@ -717,12 +817,20 @@ Panel {
         }
         ButtonGroup {
           width: parent.width
-          options: [{value:"1",label:"AF-S"},{value:"3",label:"AF-C"},{value:"4",label:"Face"}]
+          options: [
+            { value: "1", label: "AF-S" },
+            { value: "3", label: "AF-C" },
+            { value: "4", label: "Face" }
+          ]
           value: String(root.val("focus-mode", 4))
           foreground: root.foreground
           background: Color.popups.background
           fontFamily: root.fontFamily
           fontSize: Style.font.caption
+          onHovered: function(index, on) {
+            var tips = [root.focusModeTip(1), root.focusModeTip(3), root.focusModeTip(4)]
+            root.focusHoverTip = on && index >= 0 && index < tips.length ? tips[index] : ""
+          }
           onChanged: function(v) {
             root.service.setParam("focus-mode", v)
             var mode = Number(v)
@@ -742,6 +850,18 @@ Panel {
               root.afHint = ""
             }
           }
+        }
+        Text {
+          width: parent.width
+          text: root.focusHoverTip !== "" ? root.focusHoverTip : " "
+          elide: Text.ElideRight
+          maximumLineCount: 1
+          wrapMode: Text.NoWrap
+          opacity: root.focusHoverTip !== "" ? 1 : 0
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         }
       }
       Loader {

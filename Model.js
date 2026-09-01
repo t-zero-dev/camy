@@ -62,6 +62,42 @@ function enumLabel(options, value) {
   return v
 }
 
+function isoTip() {
+  return "Sensor gain (higher is brighter and grainier)."
+}
+
+function shutterTip() {
+  return "Shutter speed."
+}
+
+function zoomTip() {
+  return "Optical zoom."
+}
+
+function focusModeTip(mode) {
+  switch (Number(mode)) {
+    case 1:
+      return "Single autofocus, pick a point on the preview."
+    case 3:
+      return "Continuous autofocus. The lens keeps focusing in the area you set."
+    case 4:
+      return "Face — the camera finds a face and tracks it."
+    case 2:
+      return "Manual — you focus the lens; the camera does not autofocus."
+    default:
+      return "Focus mode."
+  }
+}
+
+function focusModeLabel(mode) {
+  return enumLabel([
+    { value: 1, label: "AF-S" },
+    { value: 2, label: "Manual" },
+    { value: 3, label: "AF-C" },
+    { value: 4, label: "Face" }
+  ], mode)
+}
+
 var TABS = [
   { id: "video", label: "Video" },
   { id: "image", label: "Image" },

@@ -8,7 +8,7 @@
 use std::fs::{self, File};
 use std::io::Write;
 use std::num::NonZeroUsize;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
 
 use crate::error::{Error, Result};
@@ -114,6 +115,9 @@ fn ioctl<T>(fd: i32, req: u64, arg: &mut T) -> Result<()> {
 
 pub struct Preview {
     stop: Arc<AtomicBool>,
+    /// Owned capture fd. Closed on Drop so a blocking STREAMON/DQBUF in the
+    /// worker wakes with EBADF instead of wedging the watch loop.
+    capture: Option<File>,
     thread: Option<JoinHandle<()>>,
     pub dir: PathBuf,
 }
@@ -122,37 +126,48 @@ impl Preview {
     pub fn start(device: &str, width: u32, height: u32, fps: u32) -> Result<Self> {
         let dir = ensure_runtime_dir()?;
         wipe_preview_files(&dir);
+        let capture = File::options()
+            .read(true)
+            .write(true)
+            .open(device)
+            .map_err(|e| {
+                if e.raw_os_error() == Some(libc::EBUSY) {
+                    Error::Busy
+                } else {
+                    Error::io_ctx(e, format!("open {device}"))
+                }
+            })?;
+        let fd = capture.as_raw_fd();
         let stop = Arc::new(AtomicBool::new(false));
         let stop2 = stop.clone();
-        let device = device.to_string();
         let dir2 = dir.clone();
         let _ = fps;
         let thread = thread::Builder::new()
             .name("yolocam-preview".into())
             .spawn(move || {
-                if let Err(e) = run(&device, width, height, &dir2, &stop2) {
+                if let Err(e) = run(fd, width, height, &dir2, &stop2) {
                     let _ = std::fs::write(dir2.join("error"), e.to_string().as_bytes());
                 }
             })
             .map_err(|e| Error::io_ctx(e, "preview thread"))?;
         Ok(Self {
             stop,
+            capture: Some(capture),
             thread: Some(thread),
             dir,
         })
     }
 
-    pub fn stop(mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+    pub fn stop(self) {
+        drop(self);
     }
 }
 
 impl Drop for Preview {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        // Close the capture fd so a kernel wait in STREAMON/DQBUF returns.
+        self.capture.take();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -247,24 +262,21 @@ impl Drop for Map {
 
 #[allow(clippy::too_many_lines)]
 fn run(
-    device: &str,
+    fd: i32,
     width: u32,
     height: u32,
     dir: &Path,
     stop: &AtomicBool,
 ) -> Result<()> {
-    let file = File::options()
-        .read(true)
-        .write(true)
-        .open(device)
-        .map_err(|e| {
-            if e.raw_os_error() == Some(libc::EBUSY) {
-                Error::Busy
-            } else {
-                Error::io_ctx(e, format!("open {device}"))
-            }
-        })?;
-    let fd = file.as_raw_fd();
+    // SAFETY: `fd` is the capture `File` held by `Preview` until Drop.
+    let file = unsafe { BorrowedFd::borrow_raw(fd) };
+    // SAFETY: `fd` is that same capture fd.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+        if flags >= 0 {
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
 
     let mut fmt = V4l2Format {
         typ: V4L2_BUF_TYPE_VIDEO_CAPTURE,
@@ -313,7 +325,7 @@ fn run(
                 len,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_SHARED,
-                &file,
+                file,
                 i64::from(buf.offset),
             )
             .map_err(|e| Error::Protocol(format!("mmap: {e}")))?
@@ -333,16 +345,24 @@ fn run(
     let mut last = Instant::now().checked_sub(min_interval).unwrap_or_else(Instant::now);
     let mut dark_streak: u8 = 0;
     let mut last_covered = false;
+    let started = Instant::now();
+    let mut got_frame = false;
+    let wait = PollTimeout::try_from(Duration::from_millis(200)).unwrap_or(PollTimeout::ZERO);
     let _ = std::fs::write(dir.join("covered"), b"0");
     while !stop.load(Ordering::Relaxed) {
+        let mut pfds = [PollFd::new(file, PollFlags::POLLIN)];
+        let _ = poll(&mut pfds, wait);
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
         let mut buf = empty_buf(0);
         if ioctl(fd, VIDIOC_DQBUF, &mut buf).is_err() {
-            if stop.load(Ordering::Relaxed) {
-                break;
+            if !got_frame && started.elapsed() > Duration::from_secs(2) {
+                return Err(Error::io("no frames"));
             }
-            thread::sleep(Duration::from_millis(5));
             continue;
         }
+        got_frame = true;
         let idx = buf.index as usize;
         let used = buf.bytesused as usize;
         if idx < maps.len() && used > 2 && last.elapsed() >= min_interval {

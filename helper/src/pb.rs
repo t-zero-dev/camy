@@ -65,12 +65,28 @@ pub enum Body {
 
 #[derive(Debug, Clone, Default)]
 pub struct Message {
-    pub ty: u32,
+    pub ty: Option<MsgType>,
     pub seq: u32,
     pub timeout: u32,
     pub resp_code: u32,
     pub id: u32,
     pub body: Body,
+}
+
+impl Message {
+    pub fn is_response_to(&self, seq: u32) -> bool {
+        self.ty == Some(MsgType::Response) && self.seq == seq
+    }
+
+    /// Yunxi often echoes cid and omits seq. Prefer seq; accept cid so SET
+    /// is consumed and does not fall through as an empty param overwrite.
+    pub fn is_reply_to(&self, seq: u32, cid: u32) -> bool {
+        self.ty == Some(MsgType::Response) && (self.seq == seq || self.id == cid)
+    }
+
+    pub fn is_notify(&self) -> bool {
+        self.ty == Some(MsgType::Notify)
+    }
 }
 
 pub fn encode_varint(mut n: u64) -> Vec<u8> {
@@ -156,8 +172,8 @@ fn encode_body(body: &Body) -> Vec<u8> {
 
 pub fn encode_message(msg: &Message) -> Vec<u8> {
     let mut o = Vec::new();
-    if msg.ty != 0 {
-        o.extend(field_varint(1, msg.ty));
+    if let Some(ty) = msg.ty {
+        o.extend(field_varint(1, ty as u32));
     }
     if msg.seq != 0 {
         o.extend(field_varint(2, msg.seq));
@@ -180,7 +196,7 @@ pub fn encode_message(msg: &Message) -> Vec<u8> {
 
 pub fn request(seq: u32, cid: u32) -> Message {
     Message {
-        ty: MsgType::Request as u32,
+        ty: Some(MsgType::Request),
         seq,
         timeout: 3000,
         id: cid,
@@ -190,7 +206,7 @@ pub fn request(seq: u32, cid: u32) -> Message {
 
 pub fn set_int(seq: u32, cid: u32, value: u32) -> Message {
     Message {
-        ty: MsgType::Set as u32,
+        ty: Some(MsgType::Set),
         seq,
         timeout: 3000,
         id: cid,
@@ -201,7 +217,7 @@ pub fn set_int(seq: u32, cid: u32, value: u32) -> Message {
 
 pub fn set_rect(seq: u32, cid: u32, rect: RectF) -> Message {
     Message {
-        ty: MsgType::Set as u32,
+        ty: Some(MsgType::Set),
         seq,
         timeout: 3000,
         id: cid,
@@ -476,7 +492,7 @@ pub fn decode_message(data: &[u8]) -> Result<Message> {
     let mut msg = Message::default();
     for f in fields {
         match (f.field, f.value) {
-            (1, ProtoValue::Varint(n)) => msg.ty = n as u32,
+            (1, ProtoValue::Varint(n)) => msg.ty = MsgType::from_u32(n as u32),
             (2, ProtoValue::Varint(n)) => msg.seq = n as u32,
             (3, ProtoValue::Varint(n)) => msg.timeout = n as u32,
             (4, ProtoValue::Varint(n)) => msg.resp_code = n as u32,
@@ -510,7 +526,7 @@ mod tests {
     fn decode_version_response() {
         let payload = hex("0804100120c80128013260525e0a1f59756e786943616d6572612d7a6869746f6e672d63683433312d302e302e3912273078383234343239343432333631306130386561663966346437363864313761633632326333301a0c303234383235333630303035220431303031");
         let msg = decode_message(&payload).unwrap();
-        assert_eq!(msg.ty, 4);
+        assert_eq!(msg.ty, Some(MsgType::Response));
         assert_eq!(msg.seq, 1);
         assert_eq!(msg.resp_code, 200);
         assert_eq!(msg.id, 1);
@@ -589,5 +605,19 @@ mod tests {
         data.extend_from_slice(&[1, 2, 3]);
         let err = decode_fields(&data).unwrap_err();
         assert_eq!(err.to_string(), "truncated bytes");
+    }
+
+    #[test]
+    fn response_matches_seq_only() {
+        let mut msg = request(3, 17);
+        msg.ty = Some(MsgType::Response);
+        msg.seq = 3;
+        assert!(msg.is_response_to(3));
+        assert!(!msg.is_response_to(4));
+        msg.seq = 0;
+        msg.id = 17;
+        assert!(!msg.is_response_to(3));
+        assert!(msg.is_reply_to(3, 17));
+        assert!(!msg.is_reply_to(3, 99));
     }
 }

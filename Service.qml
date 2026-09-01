@@ -70,6 +70,9 @@ Item {
       connected = false
       control = false
       lastError = String(ev.error || "disconnected")
+      var why = lastError.toLowerCase()
+      if (why === "unplugged" || why.indexOf("not on usb") !== -1)
+        usb = false
       return
     }
     if (event === "refreshed") {
