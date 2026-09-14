@@ -31,6 +31,12 @@ Item {
   property var focusRects: []
   property var focusArea: null
   property int heartbeatN: 0
+  property var cameras: []
+  property int glyphCode: 0
+  property string selectedModel: "s7"
+  property var unsupported: ({})
+  readonly property bool bothCameras: cameras.length >= 2
+  readonly property string selectedTitle: selectedModel === "s3" ? "YoloCam S3" : "YoloCam S7"
 
   readonly property bool previewEnabled: setting("preview", true) === true
 
@@ -39,15 +45,52 @@ Item {
     return value === undefined || value === null ? fallback : value
   }
 
+  function paramOk(name) {
+    return unsupported[name] !== true
+  }
+
+  function eventForSelected(ev) {
+    var m = ev && ev.model !== undefined && ev.model !== null ? String(ev.model) : ""
+    if (!m) return true
+    return m === selectedModel
+  }
+
   function applyEvent(ev) {
     if (!ev || typeof ev !== "object") return
     var event = String(ev.event || "")
+    if (event === "inventory") {
+      cameras = Array.isArray(ev.cameras) ? ev.cameras : []
+      glyphCode = Number(ev.glyph || 0)
+      if (ev.selected) selectedModel = String(ev.selected)
+      usb = cameras.length > 0
+      if (!usb) {
+        connected = false
+        control = false
+        previewOn = false
+        focusRects = []
+        focusArea = null
+        lastError = "YoloCam not on USB"
+      }
+      return
+    }
+    if (!eventForSelected(ev) && event !== "discover" && event !== "caps") return
+    if (event === "caps") {
+      var hide = {}
+      var list = ev.unsupported || []
+      for (var i = 0; i < list.length; i++) hide[String(list[i])] = true
+      unsupported = hide
+      return
+    }
     if (event === "discover") {
       usb = ev.usb === true
       serial = String(ev.serial || "")
       product = String(ev.product || "")
       cameraIp = String(ev.cameraIp || "")
       videoDevice = String(ev.video || "")
+      if (glyphCode === 0 && usb) {
+        var m = String(ev.model || selectedModel || "s7")
+        glyphCode = m === "s3" ? 3 : 7
+      }
       if (!usb) {
         connected = false
         control = false
@@ -78,6 +121,7 @@ Item {
     if (event === "refreshed") {
       lastError = ""
       applyStatus = "Refreshed"
+      refreshWatchdog.stop()
       applyClear.restart()
       return
     }
@@ -96,6 +140,12 @@ Item {
         return
       }
       lastError = ""
+      if (Number(ev.resp) === 100) {
+        var hide = Object.assign({}, unsupported)
+        hide[name] = true
+        unsupported = hide
+        return
+      }
       if (name === "focus-target" || name === "focus-area") {
         applyStatus = "Applied"
         applyClear.restart()
@@ -123,12 +173,17 @@ Item {
         firmware = String(ev.value.firmware)
       return
     }
+    if (event === "covered") {
+      lensCovered = ev.on === true || ev.covered === true || ev.on === 1 || ev.on === "1"
+      return
+    }
     if (event === "frame") {
       previewOn = true
       previewBusy = false
       previewSeq += 1
       previewPath = String(ev.path || "")
-      if (ev.covered === true || ev.covered === false) lensCovered = ev.covered === true
+      if (ev.covered === true || ev.covered === 1 || ev.covered === "1") lensCovered = true
+      else if (ev.covered === false || ev.covered === 0 || ev.covered === "0") lensCovered = false
       return
     }
     if (event === "focus-box") {
@@ -177,6 +232,7 @@ Item {
 
   function send(obj) {
     if (!obj) return
+    if (!obj.model) obj = Object.assign({ model: selectedModel }, obj)
     if (!watchProcess.running) {
       sendQueue = sendQueue.concat([obj])
       return
@@ -198,6 +254,35 @@ Item {
     applyClear.restart()
   }
 
+  function selectModel(model) {
+    var m = String(model || "s7")
+    if (m !== "s3" && m !== "s7") return
+    if (m === selectedModel && bothCameras) {
+      send({ cmd: "select", model: m })
+      return
+    }
+    selectedModel = m
+    values = {}
+    pending = {}
+    unsupported = {}
+    previewOn = false
+    previewPath = ""
+    previewBusy = false
+    lensCovered = false
+    focusRects = []
+    focusArea = null
+    send({ cmd: "select", model: m })
+    send({ cmd: "get-all", model: m })
+  }
+
+  function setWbOffset(r, b) {
+    var next = Object.assign({}, values)
+    next["wb-offset"] = { r: Number(r), b: Number(b) }
+    values = next
+    applyStatus = "Applying white balance…"
+    send({ cmd: "set", name: "wb-offset", r: Number(r), b: Number(b), model: selectedModel })
+  }
+
   function setParam(name, value) {
     var next = Object.assign({}, values)
     next[name] = value
@@ -206,7 +291,7 @@ Item {
     p[name] = value
     pending = p
     applyStatus = "Applying " + name + "…"
-    send({ cmd: "set", name: name, value: String(value) })
+    send({ cmd: "set", name: name, value: String(value), model: selectedModel })
   }
 
   function valueOf(name, fallback) {
@@ -217,24 +302,26 @@ Item {
 
   function refresh() {
     applyStatus = "Refreshing…"
-    send({ cmd: "get-all" })
+    refreshWatchdog.restart()
+    send({ cmd: "refresh", model: selectedModel })
   }
 
   function setPreview(on) {
     if (!previewEnabled && on) return
-    send({ cmd: "preview", on: !!on })
+    if (on) lastError = ""
+    send({ cmd: "preview", on: !!on, model: selectedModel })
   }
 
   function setAfTarget(rect) {
     if (!rect) return
     applyStatus = "Setting AF point…"
-    send({ cmd: "af-target", x: rect.x, y: rect.y, w: rect.w, h: rect.h })
+    send({ cmd: "af-target", x: rect.x, y: rect.y, w: rect.w, h: rect.h, model: selectedModel })
   }
 
   function setAfArea(rect) {
     if (!rect) return
     applyStatus = "Setting AF area…"
-    send({ cmd: "af-area", x: rect.x, y: rect.y, w: rect.w, h: rect.h })
+    send({ cmd: "af-area", x: rect.x, y: rect.y, w: rect.w, h: rect.h, model: selectedModel })
   }
 
 
@@ -274,6 +361,13 @@ Item {
       root.previewOn = false
       if (root.active) watchRestart.restart()
     }
+  }
+
+  Timer {
+    id: refreshWatchdog
+    interval: 2500
+    repeat: false
+    onTriggered: if (root.applyStatus === "Refreshing…") root.applyStatus = ""
   }
 
   Timer {

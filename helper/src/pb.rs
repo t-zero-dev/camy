@@ -163,9 +163,12 @@ fn encode_body(body: &Body) -> Vec<u8> {
             .first()
             .map(|r| field_bytes(14, &encode_rect_f(r)))
             .unwrap_or_default(),
-        Body::Empty | Body::Version(_) | Body::Range(_) | Body::WbOffset(_) | Body::Lens(_) => {
-            Vec::new()
+        Body::WbOffset(w) => {
+            let mut inner = field_varint(1, w.r);
+            inner.extend(field_varint(2, w.b));
+            field_bytes(13, &inner)
         }
+        Body::Empty | Body::Version(_) | Body::Range(_) | Body::Lens(_) => Vec::new(),
         Body::Bytes { field, data } => field_bytes(*field, data),
     }
 }
@@ -211,6 +214,17 @@ pub fn set_int(seq: u32, cid: u32, value: u32) -> Message {
         timeout: 3000,
         id: cid,
         body: Body::Int(value),
+        ..Default::default()
+    }
+}
+
+pub fn set_wb_offset(seq: u32, cid: u32, r: u32, b: u32) -> Message {
+    Message {
+        ty: Some(MsgType::Set),
+        seq,
+        timeout: 3000,
+        id: cid,
+        body: Body::WbOffset(WbOffset { r, b }),
         ..Default::default()
     }
 }

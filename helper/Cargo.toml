@@ -1,9 +1,9 @@
 [package]
 name = "yolocam"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-description = "YoloCam S7 control helper for the Omarchy plugin"
+description = "YoloCam S7/S3 control helper for the Omarchy plugin"
 
 [dependencies]
 libc = "0.2"

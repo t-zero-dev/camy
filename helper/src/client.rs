@@ -141,6 +141,15 @@ impl Client {
         Ok(seq)
     }
 
+    pub fn begin_set_wb(&mut self, cid: u32, r: u32, b: u32) -> Result<u32> {
+        if self.write_pending() {
+            return Err(Error::Busy);
+        }
+        let seq = self.next_seq();
+        self.queue_frame(&pb::set_wb_offset(seq, cid, r, b))?;
+        Ok(seq)
+    }
+
     pub fn begin_set_rect(&mut self, cid: u32, rect: pb::RectF) -> Result<u32> {
         if self.write_pending() {
             return Err(Error::Busy);

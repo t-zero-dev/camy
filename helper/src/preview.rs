@@ -12,10 +12,10 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
@@ -34,6 +34,25 @@ const VIDIOC_STREAMON: u64 = 0x4004_5612;
 const VIDIOC_STREAMOFF: u64 = 0x4004_5613;
 
 const COVER_STREAK: u8 = 3;
+const UVC_SETTLE_MS: u64 = 450;
+static LAST_STOP_MS: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+fn settle_uvc() {
+    let last = LAST_STOP_MS.load(Ordering::Relaxed);
+    if last == 0 {
+        return;
+    }
+    let wait = UVC_SETTLE_MS.saturating_sub(now_ms().saturating_sub(last));
+    if wait > 0 {
+        thread::sleep(Duration::from_millis(wait));
+    }
+}
 
 #[repr(C)]
 struct V4l2PixFormat {
@@ -124,8 +143,16 @@ pub struct Preview {
 
 impl Preview {
     pub fn start(device: &str, width: u32, height: u32, fps: u32) -> Result<Self> {
-        let dir = ensure_runtime_dir()?;
+        Self::start_in(device, width, height, fps, None)
+    }
+
+    pub fn start_in(device: &str, width: u32, height: u32, fps: u32, serial: Option<&str>) -> Result<Self> {
+        let dir = match serial {
+            Some(id) => ensure_camera_dir(id)?,
+            None => ensure_runtime_dir()?,
+        };
         wipe_preview_files(&dir);
+        settle_uvc();
         let capture = File::options()
             .read(true)
             .write(true)
@@ -171,6 +198,7 @@ impl Drop for Preview {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+        LAST_STOP_MS.store(now_ms(), Ordering::Relaxed);
     }
 }
 
@@ -187,6 +215,18 @@ pub fn runtime_dir() -> PathBuf {
 /// Create `$XDG_RUNTIME_DIR/yolocam` (or a 0700 fallback) and restrict it.
 pub fn ensure_runtime_dir() -> Result<PathBuf> {
     let dir = runtime_dir();
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .map_err(|e| Error::io_ctx(e, "mkdir"))?;
+    restrict_mode(&dir, 0o700)?;
+    Ok(dir)
+}
+
+/// JPEG ping-pong for one camera: `$XDG_RUNTIME_DIR/yolocam/<serial>/`.
+pub fn ensure_camera_dir(serial: &str) -> Result<PathBuf> {
+    let dir = runtime_dir().join(crate::discover::sanitize_id(serial));
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -337,16 +377,16 @@ fn run(
         ioctl(fd, VIDIOC_QBUF, &mut buf)?;
     }
 
-    let mut typ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ioctl(fd, VIDIOC_STREAMON, &mut typ)?;
+    stream_on(fd)?;
 
     let mut slot = 0u8;
     let min_interval = Duration::from_millis(66); // ~15 fps display
     let mut last = Instant::now().checked_sub(min_interval).unwrap_or_else(Instant::now);
     let mut dark_streak: u8 = 0;
     let mut last_covered = false;
-    let started = Instant::now();
     let mut got_frame = false;
+    let mut retried = false;
+    let mut deadline = Instant::now() + Duration::from_secs(5);
     let wait = PollTimeout::try_from(Duration::from_millis(200)).unwrap_or(PollTimeout::ZERO);
     let _ = std::fs::write(dir.join("covered"), b"0");
     while !stop.load(Ordering::Relaxed) {
@@ -357,8 +397,17 @@ fn run(
         }
         let mut buf = empty_buf(0);
         if ioctl(fd, VIDIOC_DQBUF, &mut buf).is_err() {
-            if !got_frame && started.elapsed() > Duration::from_secs(2) {
-                return Err(Error::io("no frames"));
+            if !got_frame && Instant::now() > deadline {
+                if !retried {
+                    stream_off(fd);
+                    thread::sleep(Duration::from_millis(250));
+                    stream_on(fd)?;
+                    retried = true;
+                    deadline = Instant::now() + Duration::from_secs(4);
+                    continue;
+                }
+                release_bufs(fd);
+                return Err(Error::io("no video stream"));
             }
             continue;
         }
@@ -403,10 +452,32 @@ fn run(
         let _ = ioctl(fd, VIDIOC_QBUF, &mut buf);
     }
 
-    let mut typ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    let _ = ioctl(fd, VIDIOC_STREAMOFF, &mut typ);
+    release_bufs(fd);
     drop(maps);
     Ok(())
+}
+
+fn stream_on(fd: i32) -> Result<()> {
+    let mut typ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(fd, VIDIOC_STREAMON, &mut typ)
+}
+
+fn stream_off(fd: i32) {
+    let mut typ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    let _ = ioctl(fd, VIDIOC_STREAMOFF, &mut typ);
+}
+
+fn release_bufs(fd: i32) {
+    stream_off(fd);
+    let mut req = V4l2RequestBuffers {
+        count: 0,
+        typ: V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        memory: V4L2_MEMORY_MMAP,
+        capabilities: 0,
+        flags: 0,
+        reserved: [0; 3],
+    };
+    let _ = ioctl(fd, VIDIOC_REQBUFS, &mut req);
 }
 
 #[allow(clippy::many_single_char_names)]
@@ -421,7 +492,7 @@ fn frame_is_covered(jpeg: &[u8]) -> bool {
     let mut sum: u64 = 0;
     let mut max_l: u32 = 0;
     let mut n: u64 = 0;
-    let step = 16.max(pixels.len() / 4000);
+    let step = (16.max(pixels.len() / 4000) / 3).max(1) * 3;
     let mut i = 0;
     while i + 2 < pixels.len() {
         let r = u32::from(pixels[i]);
@@ -434,13 +505,13 @@ fn frame_is_covered(jpeg: &[u8]) -> bool {
         }
         n += 1;
         i += step;
-        i -= i % 3;
     }
     if n == 0 {
         return false;
     }
     let mean = sum / n;
-    mean <= 18 && max_l <= 48
+    // Cap-on is very dark but not a perfect 0 (sensor glow / MJPEG noise).
+    mean <= 32 && max_l <= 80
 }
 
 fn trim_jpeg(data: &[u8]) -> &[u8] {
@@ -488,6 +559,13 @@ mod tests {
     use super::{choose_runtime_dir, restrict_mode, trim_jpeg};
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn camera_dir_nests_under_runtime() {
+        let p = choose_runtime_dir(Some(Path::new("/run/user/1000")), None, 1000);
+        assert_eq!(p, PathBuf::from("/run/user/1000/yolocam"));
+        assert_eq!(p.join("Y-CAM-25360005"), PathBuf::from("/run/user/1000/yolocam/Y-CAM-25360005"));
+    }
 
     #[test]
     fn prefers_absolute_xdg() {

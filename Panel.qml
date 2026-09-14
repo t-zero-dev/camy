@@ -14,6 +14,9 @@ Panel {
   manageIpc: false
 
   property string tab: "exposure"
+  property string previewOrientation: "16:9"
+  property bool previewFlipV: false
+  readonly property bool portraitPreview: previewOrientation === "9:16"
   property bool cursorActive: false
   readonly property int focusMode: Number(val("focus-mode", 4))
   readonly property string holderIcon: {
@@ -42,7 +45,51 @@ Panel {
   readonly property var service: sharedService || localService
   readonly property bool present: service.usb === true
   readonly property string camGlyph: present ? "󰄀" : "󰵝"
-  readonly property color iconColor: service.control ? Color.accent : (present ? foreground : dim)
+  readonly property int glyphCode: Number(service.glyphCode || 0)
+  readonly property bool hasS7: glyphCode === 7 || glyphCode === 10
+  readonly property bool hasS3: glyphCode === 3 || glyphCode === 10
+  readonly property color s7Color: Color.accent
+  readonly property color s3Color: hueShift(Color.accent, 0.22)
+  readonly property color iconColor: !present ? dim : (hasS3 && !hasS7 ? tint(s3Color, service.control) : tint(s7Color, service.control))
+  readonly property string heroTitle: service.selectedTitle || "YoloCam S7"
+  readonly property bool showPicker: service.bothCameras === true
+  readonly property var tabList: {
+    var all = Model.TABS
+    var out = []
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].id === "zoom" && !service.paramOk("zoom")) continue
+      if (all[i].id === "audio" && String(service.selectedModel) === "s3") continue
+      out.push({ value: all[i].id, label: all[i].label })
+    }
+    return out
+  }
+  onTabListChanged: {
+    var ok = false
+    for (var i = 0; i < tabList.length; i++) if (tabList[i].value === tab) ok = true
+    if (!ok) tab = "exposure"
+  }
+
+  function hueShift(c, turns) {
+    var h = (c.hslHue + turns) % 1
+    if (h < 0) h += 1
+    // Urgent-red band reads as an error; skip it.
+    if (h < 0.08 || h > 0.95) h = (h + 0.22) % 1
+    var s = Math.max(c.hslSaturation, 0.5)
+    var l = Math.min(Math.max(c.hslLightness, 0.48), 0.68)
+    return Qt.hsla(h, s, l, 1)
+  }
+
+  function tint(c, live) {
+    return live ? c : Qt.rgba(c.r, c.g, c.b, 0.55)
+  }
+
+  function modelControl(id) {
+    var list = service.cameras || []
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].model) === id) return list[i].control === true
+    }
+    return service.control === true
+  }
   property bool previewShowA: true
   property bool previewReady: false
   property string heroHoverTip: ""
@@ -119,6 +166,9 @@ Panel {
       return JSON.stringify({
         usb: service.usb,
         control: service.control,
+        glyph: root.glyphCode,
+        selected: service.selectedModel,
+        cameras: service.cameras,
         serial: service.serial,
         firmware: service.firmware,
         preview: service.previewOn,
@@ -139,21 +189,31 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.camGlyph
+    iconComponent: camIcon
     active: service.control && present
     activeColor: Color.accent
     useActiveColor: true
     dimmed: false
-    tooltipText: !present
-      ? "YoloCam S7 · unplugged"
-      : service.previewBusy
-        ? "YoloCam S7 · in use by " + (service.previewHolder || "another app")
-        : service.control
-          ? "YoloCam S7 · connected"
-          : "YoloCam S7 · USB only, no control"
+    tooltipText: {
+      var a = root.modelStatusLine("s7", "YoloCam S7")
+      var b = root.modelStatusLine("s3", "YoloCam S3")
+      var n = Math.max(a.length, b.length)
+      function pad(s) {
+        while (s.length < n) s += " "
+        return s
+      }
+      return pad(a) + "\n" + pad(b)
+    }
     onPressed: function(b) {
-      if (b === Qt.RightButton) service.setParam("focus-mode", val("focus-mode", 4) === 4 ? 3 : 4)
-      else root.toggle()
+      if (b === Qt.LeftButton) root.toggle()
+    }
+  }
+
+  Component {
+    id: camIcon
+    CamMark {
+      anchors.fill: parent
+      pixelSize: Style.bar.iconFont
     }
   }
 
@@ -192,14 +252,13 @@ Panel {
             width: parent.width
             implicitHeight: Math.max(heroIcon.height, heroLabels.implicitHeight)
 
-            Text {
+            CamMark {
               id: heroIcon
-              text: root.camGlyph
-              color: root.iconColor
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.display
+              pixelSize: Style.font.display
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
+              width: implicitWidth
+              height: implicitHeight
             }
 
             Column {
@@ -211,11 +270,18 @@ Panel {
               spacing: Style.space(3)
 
               Text {
-                text: "YoloCam S7"
+                text: root.heroTitle
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title
                 font.bold: true
+              }
+
+              Row {
+                visible: root.showPicker
+                spacing: Style.space(6)
+                PickerChip { modelId: "s7"; label: "S7" }
+                PickerChip { modelId: "s3"; label: "S3" }
               }
 
               Item {
@@ -245,30 +311,24 @@ Panel {
                   id: heroStats
                   anchors.fill: parent
                   visible: root.heroReadouts.length > 0
-                  spacing: Style.space(8)
+                  spacing: Style.space(6)
+                  clip: false
                   Repeater {
                     model: root.heroReadouts
-                    Row {
-                      spacing: Style.space(8)
-                      Text {
-                        visible: index > 0
-                        text: "·"
-                        color: root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                      }
-                      Text {
-                        text: String(modelData.label || "").toUpperCase()
-                        color: root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.bodySmall
-                        HoverHandler {
-                          onHoveredChanged: {
-                            if (hovered)
-                              root.heroHoverTip = String(modelData.tip || "")
-                            else if (root.heroHoverTip === String(modelData.tip || ""))
-                              root.heroHoverTip = ""
-                          }
+                    Text {
+                      required property int index
+                      required property var modelData
+                      text: (index > 0 ? "·  " : "") + String(modelData.label || "").toUpperCase()
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      verticalAlignment: Text.AlignVCenter
+                      HoverHandler {
+                        onHoveredChanged: {
+                          if (hovered)
+                            root.heroHoverTip = String(modelData.tip || "")
+                          else if (root.heroHoverTip === String(modelData.tip || ""))
+                            root.heroHoverTip = ""
                         }
                       }
                     }
@@ -294,9 +354,13 @@ Panel {
           Rectangle {
             id: previewFrame
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.round(keyCatcher.width * 9 / 16)
+            Layout.preferredHeight: root.portraitPreview
+              ? Math.round(Math.min(keyCatcher.width * 0.78, 420))
+              : Math.round(keyCatcher.width * 9 / 16)
             width: parent.width
-            height: Math.round(width * 9 / 16)
+            height: root.portraitPreview
+              ? Math.round(Math.min(width * 0.78, 420))
+              : Math.round(width * 9 / 16)
             radius: Style.cornerRadius
             color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06)
             readonly property bool live: root.previewReady && service.previewOn
@@ -304,11 +368,22 @@ Panel {
             border.color: live ? Color.accent : Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
             clip: true
 
+            Item {
+              id: viewBox
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.verticalCenter: parent.verticalCenter
+              width: root.portraitPreview ? Math.round(parent.height * 9 / 16) : parent.width
+              height: parent.height
+              clip: true
+
             Image {
               id: previewA
-              anchors.fill: parent
-              anchors.margins: 1
-              fillMode: Image.PreserveAspectFit
+              anchors.centerIn: parent
+              width: root.portraitPreview ? parent.height : parent.width
+              height: root.portraitPreview ? parent.width : parent.height
+              rotation: root.portraitPreview ? 90 : 0
+              transform: Scale { origin.x: previewA.width / 2; origin.y: previewA.height / 2; xScale: 1; yScale: root.previewFlipV ? -1 : 1 }
+              fillMode: Image.PreserveAspectCrop
               asynchronous: true
               cache: false
               smooth: false
@@ -320,9 +395,12 @@ Panel {
 
             Image {
               id: previewB
-              anchors.fill: parent
-              anchors.margins: 1
-              fillMode: Image.PreserveAspectFit
+              anchors.centerIn: parent
+              width: root.portraitPreview ? parent.height : parent.width
+              height: root.portraitPreview ? parent.width : parent.height
+              rotation: root.portraitPreview ? 90 : 0
+              transform: Scale { origin.x: previewB.width / 2; origin.y: previewB.height / 2; xScale: 1; yScale: root.previewFlipV ? -1 : 1 }
+              fillMode: Image.PreserveAspectCrop
               asynchronous: true
               cache: false
               smooth: false
@@ -355,7 +433,7 @@ Panel {
                 text: !present ? "Camera unplugged"
                       : service.previewBusy ? ("In use by " + (service.previewHolder || "another app"))
                       : service.previewOn ? "Starting preview…"
-                      : "Click for live preview"
+                      : (service.lastError ? String(service.lastError) : "Click for live preview")
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -365,10 +443,11 @@ Panel {
             Repeater {
               model: root.afOverlay
               Rectangle {
-                x: previewFrame.width * Number(modelData && modelData.x)
-                y: previewFrame.height * Number(modelData && modelData.y)
-                width: previewFrame.width * Number(modelData && modelData.w)
-                height: previewFrame.height * Number(modelData && modelData.h)
+                readonly property var d: root.camToDisplay(modelData)
+                x: viewBox.width * Number(d && d.x)
+                y: viewBox.height * Number(d && d.y)
+                width: viewBox.width * Number(d && d.w)
+                height: viewBox.height * Number(d && d.h)
                 color: "transparent"
                 border.width: 2
                 border.color: Color.accent
@@ -383,6 +462,7 @@ Panel {
               anchors.bottom: parent.bottom
               height: coverLabel.implicitHeight + Style.space(12)
               visible: root.previewReady && service.lensCovered
+              z: 8
               color: Qt.rgba(0, 0, 0, 0.72)
               Text {
                 id: coverLabel
@@ -405,7 +485,9 @@ Panel {
                 ? Qt.CrossCursor : Qt.ArrowCursor
 
               function norm(mouse) {
-                return Model.previewNorm(previewFrame.width, previewFrame.height, mouse.x, mouse.y)
+                var n = Model.previewNorm(viewBox.width, viewBox.height, mouse.x, mouse.y)
+                var c = root.displayToCam(n.x, n.y)
+                return { x: c.x, y: c.y, inside: n.inside }
               }
 
               onPressed: function(mouse) {
@@ -463,6 +545,7 @@ Panel {
                 }
               }
               onReleased: function(mouse) {
+                void mouse
                 if (root.afDragging || root.afMoving) {
                   var box = root.afDraft ? Model.clampRect(root.afDraft) : null
                   root.afDragging = false
@@ -473,18 +556,15 @@ Panel {
                     service.setAfArea(box)
                     root.afHint = ""
                   }
-                  return
                 }
-                if (root.tab === "focus" && service.previewOn) return
-                void mouse
-                service.setPreview(!service.previewOn)
               }
               onClicked: function(mouse) {
-                if (root.tab === "focus" && service.previewOn) {
-                  void mouse
-                  return
-                }
+                void mouse
+                if (root.afDragging || root.afMoving) return
+                if (service.previewOn && root.tab === "focus") return
+                service.setPreview(!service.previewOn)
               }
+            }
             }
           }
 
@@ -502,7 +582,7 @@ Panel {
           ButtonGroup {
             Layout.fillWidth: true
             width: parent.width
-            options: Model.tabOptions()
+            options: root.tabList
             value: root.tab
             foreground: root.foreground
             background: Color.popups.background
@@ -521,8 +601,9 @@ Panel {
 
             Column {
               id: panelColumn
-              width: scrollArea.availableWidth
+              width: Math.max(0, scrollArea.availableWidth - Style.space(22))
               spacing: Style.space(10)
+              topPadding: Style.space(28)
 
               Loader {
                 width: parent.width
@@ -620,18 +701,52 @@ Panel {
     return service.lastError !== "" && s === service.lastError
   }
 
+  function camToDisplay(r) {
+    if (!r) return r
+    var x = Number(r.x), y = Number(r.y), w = Number(r.w), h = Number(r.h)
+    if (root.portraitPreview) {
+      var nx = 1 - y - h
+      var ny = x
+      var nw = h
+      var nh = w
+      x = nx; y = ny; w = nw; h = nh
+    }
+    if (root.previewFlipV) y = 1 - y - h
+    return { x: x, y: y, w: w, h: h }
+  }
+
+  function displayToCam(dx, dy) {
+    if (root.previewFlipV) dy = 1 - dy
+    if (!root.portraitPreview) return { x: dx, y: dy }
+    return { x: dy, y: 1 - dx }
+  }
+
+  function modelStatusLine(id, label) {
+    var list = service.cameras || []
+    var cam = null
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].model) === id) cam = list[i]
+    }
+    if (!cam) return label + " · unplugged"
+    if (service.previewBusy && String(service.selectedModel) === id)
+      return label + " · in use by " + (service.previewHolder || "another app")
+    if (cam.control) return label + " · connected"
+    return label + " · USB only, no control"
+  }
+
+  function hasVal(name) {
+    var v = service.values ? service.values[name] : undefined
+    return v !== undefined && v !== null && v !== ""
+  }
+
   function heroStatus() {
     if (service.applyStatus !== "") return service.applyStatus
     if (service.lensCovered) return "Lens looks covered"
     if (!present) return service.lastError !== "" ? service.lastError : "Unplugged"
     if (service.previewBusy) return "In use by " + (service.previewHolder || "another app")
     if (!service.control) return service.lastError !== "" ? service.lastError : "USB only — no control"
-    var bits = []
-    bits.push("ISO " + val("iso", "—"))
-    bits.push(Model.shutterLabel(val("shutter-us", 0)))
-    bits.push(Model.zoomLabel(val("zoom", 50)))
-    bits.push(focusModeName(val("focus-mode", 4)))
-    return bits.join(" · ")
+    if (service.lastError !== "") return service.lastError
+    return "Reading camera…"
   }
 
   function focusModeName(mode) {
@@ -660,13 +775,79 @@ Panel {
     if (!present) return []
     if (service.previewBusy) return []
     if (!service.control) return []
-    var mode = val("focus-mode", 4)
-    return [
-      { label: "ISO " + val("iso", "—"), tip: "Sensor gain (higher is brighter and grainier)." },
-      { label: Model.shutterLabel(val("shutter-us", 0)), tip: "Shutter speed." },
-      { label: Model.zoomLabel(val("zoom", 50)), tip: "Optical zoom." },
-      { label: focusModeName(mode), tip: "Focus mode." }
-    ]
+    var rows = []
+    if (hasVal("iso"))
+      rows.push({ label: "ISO " + val("iso", "—"), tip: "Sensor gain" })
+    if (hasVal("shutter-us"))
+      rows.push({ label: Model.shutterLabel(val("shutter-us", 0)), tip: "Shutter speed." })
+    if (service.paramOk("zoom") && hasVal("zoom"))
+      rows.push({ label: Model.zoomLabel(val("zoom", 50)), tip: "Optical zoom." })
+    if (hasVal("focus-mode"))
+      rows.push({ label: focusModeName(val("focus-mode", 4)), tip: "Focus mode." })
+    return rows
+  }
+
+  component CamMark: Item {
+    property real pixelSize: Style.bar.iconFont
+    readonly property bool stacked: root.hasS3 && root.hasS7
+    readonly property bool s3Front: String(service.selectedModel) === "s3"
+    readonly property real shift: stacked ? Math.max(2, Math.round(pixelSize * 0.2)) : 0
+    implicitWidth: pixelSize + shift
+    implicitHeight: pixelSize + shift
+
+    Text {
+      visible: stacked
+      x: 0
+      y: 0
+      z: 0
+      text: "󰄀"
+      color: root.tint(parent.s3Front ? root.s7Color : root.s3Color, root.modelControl(parent.s3Front ? "s7" : "s3"))
+      font.family: root.fontFamily
+      font.pixelSize: parent.pixelSize
+    }
+    Text {
+      x: parent.shift
+      y: parent.shift
+      z: 1
+      text: root.present ? "󰄀" : "󰵝"
+      color: !root.present
+        ? root.dim
+        : stacked
+          ? root.tint(parent.s3Front ? root.s3Color : root.s7Color, root.modelControl(parent.s3Front ? "s3" : "s7"))
+          : root.hasS3
+            ? root.tint(root.s3Color, root.modelControl("s3"))
+            : root.tint(root.s7Color, root.modelControl("s7"))
+      font.family: root.fontFamily
+      font.pixelSize: parent.pixelSize
+    }
+  }
+
+  component PickerChip: Rectangle {
+    property string modelId
+    property string label
+    readonly property bool on: String(service.selectedModel) === modelId
+    readonly property color mark: modelId === "s3" ? root.s3Color : root.s7Color
+    width: chipLabel.implicitWidth + Style.space(12)
+    height: chipLabel.implicitHeight + Style.space(6)
+    radius: height / 2
+    color: on ? mark : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+    Text {
+      id: chipLabel
+      anchors.centerIn: parent
+      text: parent.label
+      color: parent.on ? Color.background : root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: parent.on
+    }
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: {
+        service.selectModel(parent.modelId)
+        if (typeof service.send === "function") service.send({ cmd: "tab", name: root.tab })
+      }
+    }
   }
 
   component EnumRow: Column {
@@ -674,6 +855,7 @@ Panel {
     property string name
     property var options: []
     property var fallback: options.length ? options[0].value : ""
+    visible: service.paramOk(name)
     width: parent ? parent.width : 0
     spacing: Style.space(4)
     Text {
@@ -695,19 +877,21 @@ Panel {
     }
   }
 
-  component SliderRow: Column {
+  component WbOffsetRow: Column {
+    id: wbOff
     property string title
-    property string name
-    property real minimum: 0
-    property real maximum: 100
-    property string readout: String(root.val(name, minimum))
+    property string channel
+    readonly property int cur: {
+      var o = root.val("wb-offset", { r: 10, b: 10 })
+      return Number(channel === "r" ? (o && o.r) : (o && o.b)) || 10
+    }
     width: parent ? parent.width : 0
     spacing: Style.space(4)
     Item {
       width: parent.width
-      height: label.implicitHeight
+      height: ol.implicitHeight
       Text {
-        id: label
+        id: ol
         text: title
         color: root.dim
         font.family: root.fontFamily
@@ -716,28 +900,202 @@ Panel {
       }
       Text {
         anchors.right: parent.right
-        text: readout
+        text: String(wbOff.cur)
         color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
     }
-    PanelSlider {
+    Item {
       width: parent.width
-      bar: root.bar
-      minimum: parent.minimum
-      maximum: parent.maximum
-      step: 1
-      integer: true
-      value: Number(root.val(name, minimum))
-      onReleased: function(v) { root.setNum(name, v) }
-      MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.NoButton
-        onWheel: function(wheel) {
-          root.scrollPanel(wheel)
-          wheel.accepted = true
+      height: wbSl.height
+      PanelSlider {
+        id: wbSl
+        width: parent.width
+        bar: root.bar
+        minimum: 0
+        maximum: 20
+        step: 1
+        integer: true
+        value: parent.parent.cur
+        onReleased: function(v) {
+          var o = root.val("wb-offset", { r: 10, b: 10 })
+          var r = Number(o && o.r) || 10
+          var b = Number(o && o.b) || 10
+          if (channel === "r") r = v
+          else b = v
+          service.setWbOffset(r, b)
         }
+      }
+      MouseArea {
+        anchors.fill: wbSl
+        acceptedButtons: Qt.NoButton
+        onWheel: function(wheel) { wheel.accepted = true }
+      }
+    }
+  }
+
+  component SliderRow: Column {
+    id: srow
+    property string title
+    property string name
+    property real minimum: 0
+    property real maximum: 100
+    property real step: 1
+    property bool integer: true
+    property string readout: formatLive(Number(root.val(name, minimum)))
+    property var formatLive: function(v) {
+      if (srow.integer) return String(Math.round(v))
+      return Number(v).toFixed(1)
+    }
+    property var parseLive: function(s) {
+      var n = Number(String(s).replace("+", ""))
+      return isNaN(n) ? null : n
+    }
+    visible: service.paramOk(name)
+    width: parent ? parent.width : 0
+    spacing: Style.space(4)
+
+    Text {
+      text: title
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    Row {
+      width: parent.width
+      spacing: Style.space(8)
+      height: Math.max(sl.height, stepper.height)
+
+      Item {
+        width: parent.width - stepper.width - parent.spacing
+        height: sl.height
+        PanelSlider {
+          id: sl
+          width: parent.width
+          bar: root.bar
+          minimum: srow.minimum
+          maximum: srow.maximum
+          step: srow.step
+          integer: srow.integer
+          value: Number(root.val(name, srow.minimum))
+          onMoved: function(v) {
+            if (!box.activeFocus) box.text = srow.formatLive(v)
+          }
+          onReleased: function(v) { root.setNum(name, v) }
+        }
+        MouseArea {
+          anchors.fill: sl
+          acceptedButtons: Qt.NoButton
+          onWheel: function(wheel) { wheel.accepted = true }
+        }
+        Rectangle {
+          visible: sl.dragging
+          z: 20
+          width: tipLab.implicitWidth + Style.space(10)
+          height: tipLab.implicitHeight + Style.space(6)
+          radius: Style.cornerRadius
+          color: Color.tooltip.background
+          border.color: Color.tooltip.border
+          border.width: 1
+          x: Math.max(0, Math.min(parent.width - width, sl.width * sl.progress - width / 2))
+          y: {
+            var gy = sl.mapToItem(scrollArea, 0, 0).y
+            if (gy < height + Style.space(8)) return sl.height + Style.space(4)
+            return -height - Style.space(4)
+          }
+          Text {
+            id: tipLab
+            anchors.centerIn: parent
+            text: srow.formatLive(sl.liveValue)
+            color: Color.tooltip.text
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+      }
+
+      Rectangle {
+        id: stepper
+        width: Style.space(78)
+        height: Style.space(28)
+        radius: Style.cornerRadius
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+        border.width: 1
+        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+
+        TextInput {
+          id: box
+          anchors.left: parent.left
+          anchors.right: arrows.left
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Style.space(6)
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          selectByMouse: true
+          clip: true
+          text: srow.formatLive(Number(root.val(name, srow.minimum)))
+          onEditingFinished: {
+            var n = srow.parseLive(text)
+            if (n === null || n === undefined || isNaN(n)) {
+              text = srow.formatLive(Number(root.val(name, srow.minimum)))
+              return
+            }
+            n = Math.max(srow.minimum, Math.min(srow.maximum, n))
+            if (srow.integer) n = Math.round(n)
+            root.setNum(name, n)
+            text = srow.formatLive(n)
+          }
+        }
+
+        Column {
+          id: arrows
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.rightMargin: Style.space(4)
+          spacing: 0
+          Text {
+            text: "▴"
+            color: root.dim
+            font.pixelSize: Style.font.caption
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                var n = Number(root.val(name, srow.minimum)) + srow.step
+                n = Math.min(srow.maximum, srow.integer ? Math.round(n) : n)
+                root.setNum(name, n)
+                box.text = srow.formatLive(n)
+              }
+            }
+          }
+          Text {
+            text: "▾"
+            color: root.dim
+            font.pixelSize: Style.font.caption
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                var n = Number(root.val(name, srow.minimum)) - srow.step
+                n = Math.max(srow.minimum, srow.integer ? Math.round(n) : n)
+                root.setNum(name, n)
+                box.text = srow.formatLive(n)
+              }
+            }
+          }
+        }
+      }
+    }
+
+    Connections {
+      target: service
+      function onValuesChanged() {
+        if (sl.dragging || box.activeFocus) return
+        box.text = srow.formatLive(Number(root.val(name, srow.minimum)))
       }
     }
   }
@@ -747,9 +1105,60 @@ Panel {
     Column {
       width: parent.width
       spacing: Style.space(10)
+      Column {
+        width: parent.width
+        spacing: Style.space(4)
+        Text {
+          text: "Orientation"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+        ButtonGroup {
+          width: parent.width
+          options: [{ value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }]
+          value: root.previewOrientation
+          foreground: root.foreground
+          background: Color.popups.background
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          onChanged: function(v) { root.previewOrientation = v }
+        }
+      }
       EnumRow { title: "Frame rate"; name: "frame-rate"; options: [{value:"25",label:"25"},{value:"30",label:"30"},{value:"50",label:"50"},{value:"60",label:"60"}] }
       EnumRow { title: "HDMI format"; name: "hdmi-format"; options: [{value:"0",label:"Auto"},{value:"1",label:"4K"},{value:"2",label:"1080p"},{value:"3",label:"720p"}] }
       EnumRow { title: "HDMI color"; name: "hdmi-color"; options: [{value:"0",label:"Auto"},{value:"1",label:"RGB"},{value:"2",label:"YUV422"}] }
+      Column {
+        width: parent.width
+        spacing: Style.space(4)
+        visible: String(service.selectedModel) === "s7"
+        Text {
+          text: "Vertical flip"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+        ButtonGroup {
+          width: parent.width
+          options: [{ value: "0", label: "Off" }, { value: "1", label: "On" }]
+          value: root.previewFlipV ? "1" : "0"
+          foreground: root.foreground
+          background: Color.popups.background
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          onChanged: function(v) { root.previewFlipV = v === "1" }
+        }
+        Text {
+          width: parent.width
+          wrapMode: Text.Wrap
+          text: "Mirrors the preview top-to-bottom. Does not change the USB or HDMI feed."
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
     }
   }
 
@@ -762,16 +1171,10 @@ Panel {
       SliderRow { title: "Contrast"; name: "contrast" }
       SliderRow { title: "Saturation"; name: "saturation" }
       SliderRow { title: "Brightness"; name: "brightness" }
+      SliderRow { title: "Dynamic range"; name: "dynamic-range" }
       SliderRow { title: "Hue"; name: "hue" }
       SliderRow { title: "Gamma"; name: "gamma" }
-      Row {
-        width: parent.width
-        spacing: Style.space(10)
-        EnumRow { width: (parent.width - parent.spacing) / 2; title: "Distortion"; name: "distortion"; fallback: "1"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-        EnumRow { width: (parent.width - parent.spacing) / 2; title: "Vignette"; name: "shading"; fallback: "1"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-      }
-      EnumRow { title: "Color LUT"; name: "clut"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-      SliderRow { title: "LUT mix"; name: "clut-mix"; maximum: 255 }
+      EnumRow { title: "Vignette"; name: "shading"; fallback: "1"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
     }
   }
 
@@ -819,6 +1222,7 @@ Panel {
           width: parent.width
           options: [
             { value: "1", label: "AF-S" },
+            { value: "2", label: "Manual" },
             { value: "3", label: "AF-C" },
             { value: "4", label: "Face" }
           ]
@@ -828,7 +1232,7 @@ Panel {
           fontFamily: root.fontFamily
           fontSize: Style.font.caption
           onHovered: function(index, on) {
-            var tips = [root.focusModeTip(1), root.focusModeTip(3), root.focusModeTip(4)]
+            var tips = [root.focusModeTip(1), root.focusModeTip(2), root.focusModeTip(3), root.focusModeTip(4)]
             root.focusHoverTip = on && index >= 0 && index < tips.length ? tips[index] : ""
           }
           onChanged: function(v) {
@@ -884,7 +1288,13 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
-      SliderRow { title: "Focus speed"; name: "focus-speed"; maximum: 5 }
+      SliderRow {
+        title: "Manual focus"
+        name: "manu-focus"
+        visible: root.focusMode === 2 && service.paramOk("manu-focus")
+      }
+      EnumRow { title: "Lens correction"; name: "distortion"; fallback: "1"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
+      EnumRow { title: "Focus speed"; name: "focus-speed"; options: [{value:"5",label:"Slow"},{value:"3",label:"Medium"},{value:"1",label:"Fast"}] }
     }
   }
 
@@ -896,12 +1306,89 @@ Panel {
       Column {
         width: parent.width
         spacing: Style.space(4)
+        Text {
+          text: "Zoom"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
         Item {
           width: parent.width
-          height: zLabel.implicitHeight
+          height: zsl.height
+          PanelSlider {
+            id: zsl
+            width: parent.width - Style.space(86)
+            bar: root.bar
+            minimum: 1
+            maximum: 4
+            step: 0.1
+            integer: false
+            value: Model.zoomMult(root.val("zoom", 50))
+            onMoved: function(v) { zbox.text = Number(v).toFixed(1) }
+            onReleased: function(v) { root.service.setParam("zoom", Model.zoomRaw(v)) }
+          }
+          MouseArea {
+            anchors.fill: zsl
+            acceptedButtons: Qt.NoButton
+            onWheel: function(wheel) { wheel.accepted = true }
+          }
+          Rectangle {
+            visible: zsl.dragging
+            z: 20
+            width: ztip.implicitWidth + Style.space(10)
+            height: ztip.implicitHeight + Style.space(6)
+            radius: Style.cornerRadius
+            color: Color.tooltip.background
+            border.color: Color.tooltip.border
+            border.width: 1
+            x: Math.max(0, Math.min(zsl.width - width, zsl.width * zsl.progress - width / 2))
+            y: {
+              var gy = zsl.mapToItem(scrollArea, 0, 0).y
+              if (gy < height + Style.space(12)) return zsl.height + Style.space(4)
+              return -height - Style.space(4)
+            }
+            Text {
+              id: ztip
+              anchors.centerIn: parent
+              text: Number(zsl.liveValue).toFixed(1) + "×"
+              color: Color.tooltip.text
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+          Rectangle {
+            anchors.right: parent.right
+            width: Style.space(78)
+            height: Style.space(28)
+            radius: Style.cornerRadius
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+            border.width: 1
+            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+            TextInput {
+              id: zbox
+              anchors.fill: parent
+              anchors.margins: Style.space(6)
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              text: Model.zoomMult(root.val("zoom", 50)).toFixed(1)
+              onEditingFinished: {
+                var n = Number(text)
+                if (isNaN(n)) { text = Model.zoomMult(root.val("zoom", 50)).toFixed(1); return }
+                n = Math.max(1, Math.min(4, n))
+                root.service.setParam("zoom", Model.zoomRaw(n))
+                text = Number(n).toFixed(1)
+              }
+            }
+          }
+        }
+        Item {
+          width: parent.width
+          height: wMark.implicitHeight
           Text {
-            id: zLabel
-            text: "Zoom"
+            id: wMark
+            text: "W"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -909,40 +1396,15 @@ Panel {
           }
           Text {
             anchors.right: parent.right
-            text: Model.zoomLabel(root.val("zoom", 50))
-            color: root.foreground
+            text: "T"
+            color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            font.bold: true
           }
-        }
-        PanelSlider {
-          width: parent.width
-          bar: root.bar
-          minimum: 1
-          maximum: 4
-          step: 0.1
-          integer: false
-          value: Model.zoomMult(root.val("zoom", 50))
-          onReleased: function(v) { root.service.setParam("zoom", Model.zoomRaw(v)) }
-          MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.NoButton
-            onWheel: function(wheel) {
-              root.scrollPanel(wheel)
-              wheel.accepted = true
-            }
-          }
-        }
-        Text {
-          width: parent.width
-          wrapMode: Text.Wrap
-          text: "1.0× is the full sensor. 4.0× is digital zoom (cleanest at 1080p)."
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
         }
       }
-      SliderRow { title: "Zoom speed"; name: "zoom-speed"; minimum: 1; maximum: 5 }
+
     }
   }
 
@@ -952,17 +1414,54 @@ Panel {
       width: parent.width
       spacing: Style.space(10)
       EnumRow { title: "Exposure"; name: "exposure-mode"; options: [{value:"0",label:"Auto"},{value:"1",label:"Manual"}] }
-      SliderRow { title: "EV"; name: "ev"; maximum: 16; readout: Model.evLabel(root.val("ev", 8)) }
+      SliderRow {
+        title: "EV"
+        name: "ev"
+        maximum: 16
+        visible: Number(root.val("exposure-mode", 0)) === 0 && service.paramOk("ev")
+        formatLive: function(v) { return Model.evLabel(v) }
+        parseLive: function(s) {
+          var ev = Number(String(s).replace("+", ""))
+          if (isNaN(ev)) return null
+          return Math.round(ev / 0.5 + 8)
+        }
+      }
       EnumRow { title: "Anti-flicker"; name: "anti-flicker"; options: [{value:"0",label:"Off"},{value:"1",label:"50 Hz"},{value:"2",label:"60 Hz"}] }
-      SliderRow { title: "ISO"; name: "iso"; minimum: 100; maximum: 9600 }
+      SliderRow {
+        title: "ISO"
+        name: "iso"
+        minimum: 100
+        maximum: 9600
+        visible: Number(root.val("exposure-mode", 0)) === 1 && service.paramOk("iso")
+      }
       SliderRow {
         title: "Shutter"
         name: "shutter-us"
         minimum: 125
         maximum: 40000
-        readout: Model.shutterLabel(root.val("shutter-us", 16666))
+        visible: Number(root.val("exposure-mode", 0)) === 1 && service.paramOk("shutter-us")
+        formatLive: function(v) { return Model.shutterLabel(v) }
+        parseLive: function(s) {
+          s = String(s).trim()
+          if (s.indexOf("1/") === 0) {
+            var d = Number(s.substring(2))
+            if (d > 0) return Math.round(1000000 / d)
+          }
+          var n = Number(s)
+          return isNaN(n) ? null : n
+        }
       }
-      SliderRow { title: "Aperture"; name: "aperture"; maximum: 160 }
+      SliderRow {
+        title: "Aperture"
+        name: "aperture"
+        maximum: 160
+        visible: {
+          if (!service.paramOk("aperture")) return false
+          var r = root.val("aperture-range", null)
+          if (r && r.max !== undefined) return Number(r.max) > Number(r.min)
+          return true
+        }
+      }
       Row {
         width: parent.width
         spacing: Style.space(10)
@@ -978,7 +1477,70 @@ Panel {
       width: parent.width
       spacing: Style.space(10)
       EnumRow { title: "White balance"; name: "wb-mode"; options: [{value:"1",label:"Auto"},{value:"0",label:"Manual"}] }
-      SliderRow { title: "Color temperature"; name: "wb-temp"; minimum: 2000; maximum: 10000; readout: String(root.val("wb-temp", 5500)) + " K" }
+      Column {
+        width: parent.width
+        spacing: Style.space(10)
+        visible: Number(root.val("wb-mode", 1)) === 0
+        SliderRow {
+          title: "WB"
+          name: "wb-temp"
+          minimum: 2000
+          maximum: 10000
+          step: 50
+          formatLive: function(v) { return String(Math.round(v)) }
+        }
+        SliderRow { title: "Tone"; name: "wb-tone"; maximum: 128 }
+        Item {
+          width: parent.width
+          height: wbPad.height
+          Canvas {
+            id: wbPad
+            width: Math.min(parent.width, Style.space(280))
+            height: Style.space(160)
+            anchors.horizontalCenter: parent.horizontalCenter
+            onPaint: {
+              var ctx = getContext("2d")
+              var w = width, h = height
+              for (var y = 0; y < h; y += 2) {
+                for (var x = 0; x < w; x += 2) {
+                  var t = x / Math.max(1, w - 1)
+                  var u = y / Math.max(1, h - 1)
+                  var hue = Math.round(30 + t * 200)
+                  var sat = Math.round(35 + u * 30)
+                  ctx.fillStyle = "hsl(" + hue + "," + sat + "%,55%)"
+                  ctx.fillRect(x, y, 2, 2)
+                }
+              }
+              var k = Number(root.val("wb-temp", 5500))
+              var tone = Number(root.val("wb-tone", 64))
+              var mx = ((k - 2000) / 8000) * w
+              var my = (1 - tone / 128) * h
+              ctx.strokeStyle = "#ffffff"
+              ctx.lineWidth = 2
+              ctx.beginPath()
+              ctx.arc(mx, my, 6, 0, 6.283)
+              ctx.stroke()
+            }
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.CrossCursor
+              onClicked: function(mouse) {
+                var k = Math.round(2000 + (mouse.x / Math.max(1, parent.width)) * 8000)
+                var t = Math.round(128 - (mouse.y / Math.max(1, parent.height)) * 128)
+                root.service.setParam("wb-temp", Math.max(2000, Math.min(10000, k)))
+                root.service.setParam("wb-tone", Math.max(0, Math.min(128, t)))
+                wbPad.requestPaint()
+              }
+            }
+          }
+        }
+        Connections {
+          target: service
+          function onValuesChanged() { if (wbPad.visible) wbPad.requestPaint() }
+        }
+        WbOffsetRow { title: "Red offset"; channel: "r" }
+        WbOffsetRow { title: "Blue offset"; channel: "b" }
+      }
       EnumRow { title: "WB lock"; name: "wb-lock"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
     }
   }
@@ -1007,7 +1569,8 @@ Panel {
         color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
-        text: "Firmware  " + (service.firmware || "—") + "\n"
+        text: "Model     " + (service.selectedModel === "s3" ? "S3" : "S7") + "\n"
+            + "Firmware  " + (service.firmware || "—") + "\n"
             + "Serial    " + (service.serial || "—") + "\n"
             + "Control   " + (service.cameraIp || "—") + "\n"
             + "UVC       " + (service.videoDevice || "—") + "\n"
@@ -1018,7 +1581,10 @@ Panel {
         tooltipText: "Refresh from camera"
         foreground: root.foreground
         fontFamily: root.fontFamily
-        onClicked: service.refresh()
+        onClicked: {
+          if (typeof service.send === "function") service.send({ cmd: "tab", name: "status" })
+          service.refresh()
+        }
       }
     }
   }

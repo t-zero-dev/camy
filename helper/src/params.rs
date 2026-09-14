@@ -25,6 +25,7 @@ pub const PARAMS: &[Param] = &[
     Param { name: "frame-rate", cid: 5, label: "Frame rate", group: "video", kind: Kind::Enum(&[("25", 25), ("30", 30), ("50", 50), ("60", 60)]), set_ok: true },
     Param { name: "resolution", cid: 6, label: "Resolution", group: "video", kind: Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]), set_ok: true },
     Param { name: "brightness", cid: 7, label: "Brightness", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
+    Param { name: "dynamic-range", cid: 102, label: "Dynamic range", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
     Param { name: "sharpness", cid: 8, label: "Sharpness", group: "image", kind: Kind::Int { min: -10, max: 30 }, set_ok: true },
     Param { name: "contrast", cid: 9, label: "Contrast", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
     Param { name: "saturation", cid: 10, label: "Saturation", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
@@ -41,13 +42,15 @@ pub const PARAMS: &[Param] = &[
     Param { name: "aperture", cid: 20, label: "Aperture", group: "exposure", kind: Kind::Int { min: 0, max: 160 }, set_ok: true },
     Param { name: "wb-mode", cid: 21, label: "White balance", group: "wb", kind: Kind::Enum(&[("manual", 0), ("auto", 1)]), set_ok: true },
     Param { name: "wb-temp", cid: 22, label: "Color temp", group: "wb", kind: Kind::Int { min: 2000, max: 10000 }, set_ok: true },
+    Param { name: "wb-tone", cid: 105, label: "Tone", group: "wb", kind: Kind::Int { min: 0, max: 128 }, set_ok: true },
     Param { name: "focus-mode", cid: 23, label: "Focus", group: "focus", kind: Kind::Enum(&[("afs", 1), ("manual", 2), ("afc", 3), ("face", 4)]), set_ok: true },
+    Param { name: "manu-focus", cid: 111, label: "Manual focus", group: "focus", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
     Param { name: "aperture-range", cid: 31, label: "Aperture range", group: "status", kind: Kind::Info, set_ok: false },
     Param { name: "shutter-range", cid: 32, label: "Shutter range", group: "status", kind: Kind::Info, set_ok: false },
     Param { name: "wb-offset", cid: 33, label: "WB offset", group: "wb", kind: Kind::Info, set_ok: false },
     Param { name: "focus-box", cid: 38, label: "Focus box", group: "focus", kind: Kind::Enum(&[("large", 0), ("medium", 1), ("small", 2)]), set_ok: true },
     Param { name: "caf", cid: 42, label: "Continuous AF", group: "focus", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "focus-speed", cid: 47, label: "Focus speed", group: "focus", kind: Kind::Int { min: 0, max: 5 }, set_ok: true },
+    Param { name: "focus-speed", cid: 47, label: "Focus speed", group: "focus", kind: Kind::Enum(&[("fast", 1), ("medium", 3), ("slow", 5)]), set_ok: true },
     Param { name: "lens-status", cid: 48, label: "Lens", group: "status", kind: Kind::Info, set_ok: false },
     Param { name: "usb-version", cid: 60, label: "USB", group: "status", kind: Kind::Info, set_ok: false },
     Param { name: "hdmi-format", cid: 61, label: "HDMI format", group: "video", kind: Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]), set_ok: true },
@@ -69,17 +72,20 @@ pub const PARAMS: &[Param] = &[
 
 /// Enough for the first paint. Stay well under the ~25-request crash threshold.
 pub const WARM: &[&str] = &[
-    "firmware",
-    "focus-mode",
-    "focus-box",
-    "zoom",
-    "exposure-mode",
-    "ev",
     "iso",
     "shutter-us",
+    "zoom",
+    "focus-mode",
+    "firmware",
+    "focus-box",
+    "exposure-mode",
+    "ev",
     "wb-mode",
     "wb-temp",
+    "wb-tone",
     "brightness",
+    "dynamic-range",
+    "manu-focus",
     "contrast",
     "distortion",
     "shading",
@@ -102,27 +108,39 @@ pub fn tab_group(tab: &str) -> &'static str {
     }
 }
 
-/// Indices into `PARAMS`: `group` first, table order otherwise.
+/// Indices into `PARAMS`: hero/WARM first, then `group`, then the rest.
 pub fn fill_order(group: &str) -> Vec<usize> {
-    let mut first = Vec::new();
-    let mut rest = Vec::new();
-    for (i, p) in PARAMS.iter().enumerate() {
-        if p.group == group {
-            first.push(i);
-        } else {
-            rest.push(i);
+    let mut out = Vec::new();
+    let mut seen = vec![false; PARAMS.len()];
+    for name in WARM {
+        if let Some(i) = PARAMS.iter().position(|p| p.name == *name) {
+            if !seen[i] {
+                seen[i] = true;
+                out.push(i);
+            }
         }
     }
-    first.extend(rest);
-    first
+    for (i, p) in PARAMS.iter().enumerate() {
+        if p.group == group && !seen[i] {
+            seen[i] = true;
+            out.push(i);
+        }
+    }
+    for (i, _) in PARAMS.iter().enumerate() {
+        if !seen[i] {
+            out.push(i);
+        }
+    }
+    out
 }
 
-/// Panel Refresh: current tab only. Skip `Info` except on the status tab.
+/// Panel Refresh: current tab only. Skip bulky Info (`lens-detail`).
 pub fn refresh_order(group: &str) -> Vec<usize> {
     PARAMS
         .iter()
         .enumerate()
         .filter(|(_, p)| p.group == group)
+        .filter(|(_, p)| p.name != "lens-detail")
         .filter(|(_, p)| group == "status" || !matches!(p.kind, Kind::Info))
         .map(|(i, _)| i)
         .collect()
@@ -374,9 +392,15 @@ mod tests {
     use crate::pb::RectF;
 
     #[test]
-    fn fill_order_puts_group_first() {
-        let order = super::fill_order("exposure");
-        assert_eq!(super::PARAMS[order[0]].group, "exposure");
+    fn fill_order_puts_warm_first() {
+        let order = super::fill_order("audio");
+        assert_eq!(super::PARAMS[order[0]].name, "iso");
+        assert_eq!(super::PARAMS[order[1]].name, "shutter-us");
+        let iso = order.iter().position(|&i| super::PARAMS[i].name == "iso").unwrap();
+        let zoom = order.iter().position(|&i| super::PARAMS[i].name == "zoom").unwrap();
+        let focus = order.iter().position(|&i| super::PARAMS[i].name == "focus-mode").unwrap();
+        let vol = order.iter().position(|&i| super::PARAMS[i].name == "audio-volume").unwrap();
+        assert!(iso < vol && zoom < vol && focus < vol);
         assert!(order.iter().any(|&i| super::PARAMS[i].group == "audio"));
     }
 
@@ -400,6 +424,7 @@ mod tests {
         let status = super::refresh_order("status");
         assert!(status.iter().any(|&i| super::PARAMS[i].name == "firmware"));
         assert!(status.iter().all(|&i| super::PARAMS[i].group == "status"));
+        assert!(status.iter().all(|&i| super::PARAMS[i].name != "lens-detail"));
 
         let wb = super::refresh_order("wb");
         assert!(wb.iter().all(|&i| super::PARAMS[i].name != "wb-offset"));

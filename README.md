@@ -1,12 +1,14 @@
-# YoloCam S7 for Omarchy
+# YoloCam for Omarchy
 
-A native Omarchy bar plugin that talks to the YoloCam S7 over the same Yunxi protobuf control channel YoloLiv Compose uses on Windows.
+A native Omarchy bar plugin that talks to YoloCam S7 (and S3, when present) over the same Yunxi protobuf control channel YoloLiv Compose uses on Windows.
 
 The camera has no body menus. Settings live on the camera. This plugin is the remote.
 
+The bar glyph colour is the model: accent = S7, a shifted accent = S3, two overlapping cameras = both. At most one of each model.
+
 ## What you get
 
-- Bar glyph, live while the S7 is on USB 3
+- Bar glyph, live while a YoloCam is on USB 3
 - Tabbed panel: Video, Image, Focus, Zoom, Exposure, WB, Audio, Status
 - Live MJPEG preview **only while the panel is open**, 1280×720, ~15 fps, JPEG passthrough in a Rust helper
 - If OBS already has the UVC node, preview says "in use" and controls keep working
@@ -51,7 +53,7 @@ omarchy plugin enable yolocam --section right
 
 ## Hardware notes
 
-This S7 is USB `46f8:0851`, gadget `192.168.129.10:12345`, UVC `/dev/video34`. The CDC link must not become the default route (it does not, as long as Wi-Fi/Ethernet already owns default).
+This S7 is USB `46f8:0851`, gadget `192.168.129.10:12345`. An S3 is expected as `46f8:0855` / `192.168.126.10:12345` (unprobed until one is docked). The CDC link must not become the default route (it does not, as long as Wi-Fi/Ethernet already owns default).
 
 If `yolocam status` shows USB but `"control": false` and connection refused on port 12345, the camera's control process has stalled. Power-cycle the S7 (data + power cables). Do not leave a second app STREAMON on `/dev/video34` while hammering GET-all.
 

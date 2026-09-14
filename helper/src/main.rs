@@ -35,6 +35,7 @@ fn main() {
         "list" => cmd_list(),
         "get" => cmd_get(&args[1..]),
         "get-all" => cmd_get_all(),
+        "dump-cids" => cmd_dump_cids(&args[1..]),
         "set" => cmd_set(&args[1..]),
         "iso" => cmd_set_alias("iso", &args[1..]),
         "shutter" => cmd_shutter(&args[1..]),
@@ -62,7 +63,7 @@ fn main() {
 
 fn print_help() {
     println!(
-        "yolocam — YoloCam S7 control\n\
+        "yolocam — YoloCam S7/S3 control\n\
          \n\
          Commands:\n\
            status              USB, NCM, control port, firmware\n\
@@ -116,7 +117,8 @@ fn watch_owns_control() -> bool {
 }
 
 fn cmd_status() -> Result<()> {
-    let disc = discover::discover();
+    let inv = discover::discover_all();
+    let disc = inv.primary();
     let mut firmware = serde_json::Value::Null;
     let mut reachable = false;
     if watch_owns_control() {
@@ -129,8 +131,27 @@ fn cmd_status() -> Result<()> {
             }
         }
     }
+    let cameras: Vec<_> = inv
+        .plugged()
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "model": d.model,
+                "id": d.serial,
+                "serial": d.serial,
+                "usb": d.usb,
+                "vidPid": d.vid_pid,
+                "iface": d.iface,
+                "hostIp": d.host_ip,
+                "cameraIp": d.camera_ip,
+                "video": d.video,
+                "videoName": d.video_name
+            })
+        })
+        .collect();
     ok(serde_json::json!({
         "usb": disc.usb,
+        "model": disc.model,
         "vidPid": disc.vid_pid,
         "serial": disc.serial,
         "product": disc.product,
@@ -141,7 +162,9 @@ fn cmd_status() -> Result<()> {
         "control": reachable,
         "video": disc.video,
         "videoName": disc.video_name,
-        "firmware": firmware
+        "firmware": firmware,
+        "glyph": inv.glyph_code(),
+        "cameras": cameras
     }));
     Ok(())
 }
@@ -207,6 +230,47 @@ fn cmd_get(args: &[String]) -> Result<()> {
         items.push(param_object(p.name, &msg));
     }
     ok(serde_json::json!({"items": items}));
+    Ok(())
+}
+
+fn cmd_dump_cids(args: &[String]) -> Result<()> {
+    if watch_owns_control() {
+        return Err(Error::Invalid("watch owns TCP 12345; use the panel".into()));
+    }
+    let inv = discover::discover_all();
+    let mut rest = args;
+    let disc = match rest.first().map(String::as_str) {
+        Some("s3") => {
+            rest = &rest[1..];
+            inv.s3.clone().filter(|d| d.usb).ok_or_else(|| Error::Invalid("no S3".into()))?
+        }
+        Some("s7") => {
+            rest = &rest[1..];
+            inv.s7.clone().filter(|d| d.usb).ok_or_else(|| Error::Invalid("no S7".into()))?
+        }
+        _ => inv.primary(),
+    };
+    let parsed: Vec<u32> = rest.iter().filter_map(|s| s.parse().ok()).collect();
+    let default: &[u32] = &[25, 29, 102, 105, 111];
+    let cids: Vec<u32> = if parsed.is_empty() {
+        default.to_vec()
+    } else {
+        parsed
+    };
+    let mut c = connect(&disc)?;
+    let _ = c.heartbeat();
+    let mut items = Vec::new();
+    for cid in &cids {
+        match c.get_within(*cid, Duration::from_millis(280)) {
+            Ok(msg) => items.push(serde_json::json!({
+                "cid": cid,
+                "resp": msg.resp_code,
+                "value": params::body_json(&msg)
+            })),
+            Err(e) => items.push(serde_json::json!({"cid": cid, "error": e.to_string()})),
+        }
+    }
+    ok(serde_json::json!({"model": disc.model, "serial": disc.serial, "items": items}));
     Ok(())
 }
 

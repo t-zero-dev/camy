@@ -1,5 +1,8 @@
 //! One `poll` over camera TCP, ctl socket, stdin, and USB inotify.
 //! Idle GET is a pending RPC, not a blocking walk.
+//!
+//! At most one S7 and one S3 session. Commands without `model`/`id` hit the
+//! selected camera (S7 if both just appeared).
 
 use std::io::{self, BufRead};
 use std::os::fd::AsFd;
@@ -9,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use yolocam::client::Client;
-use yolocam::discover::{self, Discovery};
+use yolocam::discover::{self, Discovery, Inventory, Model};
 use yolocam::params::{self, Param};
 use yolocam::pb;
 use yolocam::preview::Preview;
@@ -22,20 +25,28 @@ use super::{connect_watch, ctl_path, emit};
 enum SetBody {
     Int(u32),
     Rect(pb::RectF),
+    Wb { r: u32, b: u32 },
 }
 
 impl SetBody {
     fn set_wire(self) -> Option<u32> {
         match self {
             Self::Int(w) => Some(w),
-            Self::Rect(_) => None,
+            Self::Rect(_) | Self::Wb { .. } => None,
         }
     }
 
     fn set_rect(self) -> Option<pb::RectF> {
         match self {
             Self::Rect(r) => Some(r),
-            Self::Int(_) => None,
+            Self::Int(_) | Self::Wb { .. } => None,
+        }
+    }
+
+    fn set_wb(self) -> Option<(u32, u32)> {
+        match self {
+            Self::Wb { r, b } => Some((r, b)),
+            _ => None,
         }
     }
 }
@@ -48,7 +59,7 @@ enum RpcBody {
 
 impl RpcBody {
     fn timeout_is_error(self) -> bool {
-        matches!(self, Self::Set(SetBody::Int(_)))
+        matches!(self, Self::Set(SetBody::Int(_) | SetBody::Wb { .. }))
     }
 
     fn set_wire(self) -> Option<u32> {
@@ -113,7 +124,7 @@ fn take_send(rpc: &mut Rpc, fill: &mut Fill, last_fill: Instant) -> Option<SendK
     fill.peek_due(last_fill).map(SendKind::Get)
 }
 
-struct Watch {
+struct Session {
     disc: Discovery,
     client: Option<Client>,
     rpc: Rpc,
@@ -123,8 +134,57 @@ struct Watch {
     focus: FocusEmit,
     last_beat: Instant,
     last_reconnect: Instant,
-    last_usb_fallback: Instant,
     last_fill: Instant,
+    last_covered: Option<bool>,
+    unsupported: Vec<&'static str>,
+}
+
+impl Session {
+    fn new(disc: Discovery) -> Self {
+        let client = open_client(&disc);
+        let unsupported = match disc.model {
+            Model::S3 => vec![
+                "hue",
+                "gamma",
+                "zoom",
+                "lens-detail",
+                "mic-type",
+                "audio-volume",
+                "audio-denoise",
+                "audio-reverb",
+                "audio-delay",
+                "audio-agc",
+                "hdmi-format",
+                "hdmi-color",
+                "brightness",
+                "distortion",
+                "clut",
+                "clut-mix",
+            ],
+            Model::S7 => Vec::new(),
+        };
+        Self {
+            disc,
+            client,
+            rpc: Rpc::new(),
+            fill: Fill::new("exposure"),
+            preview: None,
+            last_slot: String::new(),
+            focus: FocusEmit::default(),
+            last_beat: Instant::now(),
+            last_reconnect: Instant::now(),
+            last_fill: Instant::now(),
+            last_covered: None,
+            unsupported,
+        }
+    }
+}
+
+struct Watch {
+    s7: Option<Session>,
+    s3: Option<Session>,
+    selected: Model,
+    last_usb_fallback: Instant,
     plugs: Option<PlugWatch>,
     usb_fallback: Option<Duration>,
     listener: UnixListener,
@@ -137,12 +197,6 @@ pub fn run() -> Result<()> {
 
 impl Watch {
     fn open() -> Result<Self> {
-        let disc = discover::discover();
-        emit(serde_json::json!({"event":"discover","ok": true, "usb": disc.usb, "video": disc.video, "cameraIp": disc.camera_ip, "iface": disc.iface, "serial": disc.serial, "product": disc.product}));
-        if !disc.usb {
-            emit(serde_json::json!({"event":"disconnected","error":"camera not on USB"}));
-        }
-
         let _dir = yolocam::preview::ensure_runtime_dir()?;
         let sock_path = ctl_path();
         let _ = std::fs::remove_file(&sock_path);
@@ -150,32 +204,24 @@ impl Watch {
         listener.set_nonblocking(true).ok();
         yolocam::preview::restrict_mode(&sock_path, 0o700)?;
 
-        let client = open_client(&disc);
         let plugs = PlugWatch::new();
-        // inotify is the plug signal. Only walk sysfs on a timer if that watch
-        // could not be created.
         let usb_fallback = if plugs.is_some() {
             None
         } else {
             Some(Duration::from_millis(800))
         };
-        Ok(Self {
-            disc,
-            client,
-            rpc: Rpc::new(),
-            fill: Fill::new("exposure"),
-            preview: None,
-            last_slot: String::new(),
-            focus: FocusEmit::default(),
-            last_beat: Instant::now(),
-            last_reconnect: Instant::now(),
+        let mut w = Self {
+            s7: None,
+            s3: None,
+            selected: Model::S7,
             last_usb_fallback: Instant::now(),
-            last_fill: Instant::now(),
             plugs,
             usb_fallback,
             listener,
             sock_path,
-        })
+        };
+        w.sync_inventory(true);
+        Ok(w)
     }
 
     fn run_loop(mut self) -> Result<()> {
@@ -193,22 +239,30 @@ impl Watch {
 
     fn poll_once(&mut self, input: &mut (impl BufRead + AsFd), line: &mut String) -> bool {
         self.tick_usb();
-        self.tick_heartbeat();
-        let (stdin_hit, ctl_hit, plug_hit, cam_hit) = self.poll_fds(input);
-        if plug_hit && self.plugs.as_ref().is_some_and(PlugWatch::changed) {
-            self.rediscover();
+        self.tick_heartbeat(Model::S7);
+        self.tick_heartbeat(Model::S3);
+        let hits = self.poll_fds(input);
+        if hits.plug && self.plugs.as_ref().is_some_and(PlugWatch::changed) {
+            self.sync_inventory(false);
         }
-        self.flush_camera();
-        if cam_hit {
-            self.on_camera();
+        self.flush_camera(Model::S7);
+        self.flush_camera(Model::S3);
+        if hits.s7 {
+            self.on_camera(Model::S7);
         }
-        self.expire_pending();
-        self.kick_set();
-        drain_preview(&mut self.preview, &mut self.last_slot, &self.disc);
-        if ctl_hit {
+        if hits.s3 {
+            self.on_camera(Model::S3);
+        }
+        self.expire_pending(Model::S7);
+        self.expire_pending(Model::S3);
+        self.kick_set(Model::S7);
+        self.kick_set(Model::S3);
+        self.drain_preview(Model::S7);
+        self.drain_preview(Model::S3);
+        if hits.ctl {
             self.on_ctl();
         }
-        if stdin_hit {
+        if hits.stdin {
             line.clear();
             if input.read_line(line).unwrap_or(0) == 0 {
                 return false;
@@ -218,10 +272,23 @@ impl Watch {
                 self.on_stdin(line);
             }
         }
-        if self.fill.take_refreshed(self.rpc.pending.is_none()) {
-            emit(serde_json::json!({"event":"refreshed"}));
-        }
+        self.emit_refreshed(Model::S7);
+        self.emit_refreshed(Model::S3);
         true
+    }
+
+    fn slot(&self, model: Model) -> Option<&Session> {
+        match model {
+            Model::S7 => self.s7.as_ref(),
+            Model::S3 => self.s3.as_ref(),
+        }
+    }
+
+    fn slot_mut(&mut self, model: Model) -> Option<&mut Session> {
+        match model {
+            Model::S7 => self.s7.as_mut(),
+            Model::S3 => self.s3.as_mut(),
+        }
     }
 
     fn tick_usb(&mut self) {
@@ -230,82 +297,98 @@ impl Watch {
             .is_some_and(|gap| self.last_usb_fallback.elapsed() > gap);
         if self.plugs.as_ref().is_some_and(PlugWatch::changed) || fallback_due {
             self.last_usb_fallback = Instant::now();
-            self.rediscover();
+            self.sync_inventory(false);
         }
-        if self.client.is_none() && self.disc.usb && self.last_reconnect.elapsed() > Duration::from_secs(3)
-        {
-            self.last_reconnect = Instant::now();
-            self.client = open_client(&self.disc);
-            if self.client.is_some() {
-                self.fill.reset();
-                self.rpc.clear();
-                self.last_fill = Instant::now();
+        self.try_reconnect(Model::S7);
+        self.try_reconnect(Model::S3);
+    }
+
+    fn try_reconnect(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        if s.client.is_none() && s.disc.usb && s.last_reconnect.elapsed() > Duration::from_secs(3) {
+            s.last_reconnect = Instant::now();
+            s.client = open_client(&s.disc);
+            if s.client.is_some() {
+                s.fill.reset();
+                s.rpc.clear();
+                s.last_fill = Instant::now();
             }
         }
     }
 
-    fn tick_heartbeat(&mut self) {
-        let Some(mut c) = self.client.take() else {
+    fn tick_heartbeat(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
             return;
         };
-        if self.last_beat.elapsed() > Duration::from_secs(25)
-            && c.pace_ready()
-            && self.rpc.queued.is_none()
+        let Some(mut c) = s.client.take() else {
+            return;
+        };
+        if s.last_beat.elapsed() > Duration::from_secs(25) && c.pace_ready() && s.rpc.queued.is_none()
         {
             match c.queue_heartbeat() {
-                Ok(()) => self.last_beat = Instant::now(),
+                Ok(()) => s.last_beat = Instant::now(),
                 Err(e) if e.is_transient_write() => {}
                 Err(e) => {
                     drop(c);
-                    self.disconnect(&e);
+                    disconnect_session(s, &e);
                     return;
                 }
             }
         }
-        self.client = Some(c);
+        s.client = Some(c);
     }
 
     fn poll_timeout(&self) -> PollTimeout {
-        // Slot files are not in the poll set. Preview display is ~15 fps, so
-        // drain at least that often while the viewfinder is on.
-        let mut wait = if self.preview.is_some() {
-            Duration::from_millis(40)
-        } else {
-            Duration::from_millis(250)
-        };
-        if let Some(p) = &self.rpc.pending {
-            wait = wait.min(
-                Duration::from_millis(400)
-                    .saturating_sub(p.started.elapsed())
-                    .max(Duration::from_millis(5)),
-            );
-        }
-        if self.client.is_none() && self.disc.usb {
-            wait = wait.min(
-                Duration::from_secs(3)
-                    .saturating_sub(self.last_reconnect.elapsed())
-                    .max(Duration::from_millis(20)),
-            );
-        }
-        if self.client.is_some() && self.preview.is_none() {
-            wait = wait.min(
-                Duration::from_secs(25)
-                    .saturating_sub(self.last_beat.elapsed())
-                    .max(Duration::from_millis(20)),
-            );
+        let mut wait = Duration::from_millis(250);
+        for s in [self.s7.as_ref(), self.s3.as_ref()].into_iter().flatten() {
+            if s.preview.is_some() {
+                wait = wait.min(Duration::from_millis(40));
+            }
+            if let Some(p) = &s.rpc.pending {
+                wait = wait.min(
+                    Duration::from_millis(400)
+                        .saturating_sub(p.started.elapsed())
+                        .max(Duration::from_millis(5)),
+                );
+            }
+            if s.client.is_none() && s.disc.usb {
+                wait = wait.min(
+                    Duration::from_secs(3)
+                        .saturating_sub(s.last_reconnect.elapsed())
+                        .max(Duration::from_millis(20)),
+                );
+            }
+            if s.client.is_some() && s.preview.is_none() {
+                wait = wait.min(
+                    Duration::from_secs(25)
+                        .saturating_sub(s.last_beat.elapsed())
+                        .max(Duration::from_millis(20)),
+                );
+            }
         }
         PollTimeout::try_from(wait).unwrap_or(PollTimeout::ZERO)
     }
 
-    fn poll_fds(&self, input: &impl AsFd) -> (bool, bool, bool, bool) {
+    fn poll_fds(&self, input: &impl AsFd) -> Hits {
         let timeout = self.poll_timeout();
-        let mut fds: Vec<PollFd> = Vec::with_capacity(4);
+        let mut fds: Vec<PollFd> = Vec::with_capacity(5);
         fds.push(PollFd::new(input.as_fd(), PollFlags::POLLIN));
         fds.push(PollFd::new(self.listener.as_fd(), PollFlags::POLLIN));
         if let Some(p) = self.plugs.as_ref() {
             fds.push(PollFd::new(p.fd(), PollFlags::POLLIN));
         }
-        if let Some(c) = self.client.as_ref() {
+        let s7_live = self.s7.as_ref().is_some_and(|s| s.client.is_some());
+        let s3_live = self.s3.as_ref().is_some_and(|s| s.client.is_some());
+        if let Some(c) = self.s7.as_ref().and_then(|s| s.client.as_ref()) {
+            let mut flags = PollFlags::POLLIN;
+            if c.write_pending() {
+                flags |= PollFlags::POLLOUT;
+            }
+            fds.push(PollFd::new(c.fd(), flags));
+        }
+        if let Some(c) = self.s3.as_ref().and_then(|s| s.client.as_ref()) {
             let mut flags = PollFlags::POLLIN;
             if c.write_pending() {
                 flags |= PollFlags::POLLOUT;
@@ -313,22 +396,32 @@ impl Watch {
             fds.push(PollFd::new(c.fd(), flags));
         }
         let _ = poll(&mut fds, timeout);
-        let stdin_hit = fds[0].any() == Some(true);
-        let ctl_hit = fds[1].any() == Some(true);
+        let stdin = fds[0].any() == Some(true);
+        let ctl = fds[1].any() == Some(true);
         let mut idx = 2;
-        let plug_hit = if self.plugs.is_some() {
+        let plug = if self.plugs.is_some() {
             let hit = fds[idx].any() == Some(true);
             idx += 1;
             hit
         } else {
             false
         };
-        let cam_hit = self.client.is_some() && fds.get(idx).is_some_and(|f| f.any() == Some(true));
-        (stdin_hit, ctl_hit, plug_hit, cam_hit)
+        let s7 = if s7_live {
+            let hit = fds.get(idx).is_some_and(|f| f.any() == Some(true));
+            idx += 1;
+            hit
+        } else {
+            false
+        };
+        let s3 = s3_live && fds.get(idx).is_some_and(|f| f.any() == Some(true));
+        Hits { stdin, ctl, plug, s7, s3 }
     }
 
-    fn flush_camera(&mut self) {
-        let Some(mut c) = self.client.take() else {
+    fn flush_camera(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        let Some(mut c) = s.client.take() else {
             return;
         };
         if c.write_pending() {
@@ -337,67 +430,86 @@ impl Watch {
                 Err(e) if e.is_transient_write() => {}
                 Err(e) => {
                     drop(c);
-                    self.disconnect(&e);
+                    disconnect_session(s, &e);
                     return;
                 }
             }
         }
-        self.client = Some(c);
+        s.client = Some(c);
     }
 
-    fn on_camera(&mut self) {
-        let Some(mut c) = self.client.take() else {
+    fn on_camera(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        let Some(mut c) = s.client.take() else {
             return;
         };
         match c.try_read() {
             Ok(msgs) => {
-                self.client = Some(c);
-                dispatch(&mut self.focus, &mut self.rpc.pending, msgs);
+                s.client = Some(c);
+                dispatch(&s.disc, &mut s.focus, &mut s.rpc.pending, &mut s.unsupported, msgs);
             }
-            Err(e) => self.disconnect(&e),
+            Err(e) => disconnect_session(s, &e),
         }
     }
 
-    fn expire_pending(&mut self) {
-        let timed_out = self
+    fn expire_pending(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        let timed_out = s
             .rpc
             .pending
             .as_ref()
             .is_some_and(|p| p.started.elapsed() > Duration::from_millis(400));
         if timed_out {
-            if let Some(p) = self.rpc.pending.take() {
+            if let Some(p) = s.rpc.pending.take() {
                 if let Some(ev) = set_timeout_event(&p) {
-                    emit(ev);
+                    emit_cam(&s.disc, ev);
                 }
             }
         }
     }
 
-    fn kick_set(&mut self) {
-        if self.rpc.pending.is_some() {
+    fn any_preview(&self) -> bool {
+        self.s7.as_ref().is_some_and(|s| s.preview.is_some())
+            || self.s3.as_ref().is_some_and(|s| s.preview.is_some())
+    }
+
+    fn kick_set(&mut self, model: Model) {
+        let hold_gets = self.any_preview();
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        if s.rpc.pending.is_some() {
             return;
         }
-        let Some(mut c) = self.client.take() else {
+        let Some(mut c) = s.client.take() else {
             return;
         };
         if !c.pace_ready() {
-            self.client = Some(c);
+            s.client = Some(c);
             return;
         }
-        let send_err = match take_send(&mut self.rpc, &mut self.fill, self.last_fill) {
+        let send_err = match take_send(&mut s.rpc, &mut s.fill, s.last_fill) {
             Some(SendKind::Set(q)) => {
                 let started = Instant::now();
                 let send = match q.body {
                     SetBody::Int(wire) => c.begin_set(q.cid, wire),
                     SetBody::Rect(rect) => c.begin_set_rect(q.cid, rect),
+                    SetBody::Wb { r, b } => c.begin_set_wb(q.cid, r, b),
                 };
                 match send {
                     Ok(seq) => {
                         if let Some(r) = q.body.set_rect() {
-                            emit(serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}));
-                            emit(serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
+                            emit_cam(&s.disc, serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}));
+                            emit_cam(&s.disc, serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
                         }
-                        self.rpc.pending = Some(Pending {
+                        if let Some((wr, wb)) = q.body.set_wb() {
+                            emit_cam(&s.disc, serde_json::json!({"event":"param","name": "wb-offset", "cid": q.cid, "resp": 0, "value": {"r": wr, "b": wb}}));
+                        }
+                        s.rpc.pending = Some(Pending {
                             seq,
                             name: q.name,
                             cid: q.cid,
@@ -407,17 +519,22 @@ impl Watch {
                         None
                     }
                     Err(e) if e.is_transient_write() => {
-                        self.rpc.queued = Some(q);
+                        s.rpc.queued = Some(q);
                         None
                     }
                     Err(e) => Some(e),
                 }
             }
+            Some(SendKind::Get(_)) if hold_gets && !s.fill.is_urgent() => None,
+            Some(SendKind::Get(p)) if s.unsupported.contains(&p.name) => {
+                s.fill.commit();
+                None
+            }
             Some(SendKind::Get(p)) => match c.begin_get(p.cid) {
                 Ok(seq) => {
-                    self.fill.commit();
-                    self.last_fill = Instant::now();
-                    self.rpc.pending = Some(Pending {
+                    s.fill.commit();
+                    s.last_fill = Instant::now();
+                    s.rpc.pending = Some(Pending {
                         seq,
                         name: p.name,
                         cid: p.cid,
@@ -433,10 +550,26 @@ impl Watch {
         };
         if let Some(e) = send_err {
             drop(c);
-            self.disconnect(&e);
+            disconnect_session(s, &e);
             return;
         }
-        self.client = Some(c);
+        s.client = Some(c);
+    }
+
+    fn drain_preview(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        drain_preview(s);
+    }
+
+    fn emit_refreshed(&mut self, model: Model) {
+        let Some(s) = self.slot_mut(model) else {
+            return;
+        };
+        if s.fill.take_refreshed(s.rpc.pending.is_none()) {
+            emit_cam(&s.disc, serde_json::json!({"event":"refreshed"}));
+        }
     }
 
     fn on_stdin(&mut self, line: &str) {
@@ -462,35 +595,64 @@ impl Watch {
         }
     }
 
-    fn disconnect(&mut self, e: &Error) {
-        self.client = None;
-        self.rpc.clear();
-        emit(serde_json::json!({"event":"disconnected","error": e.to_string()}));
-        // Power-off drops TCP first. Recheck USB so the bar can go outline
-        // instead of sitting on "USB only".
-        self.rediscover();
-    }
-
-    fn rediscover(&mut self) {
-        let next = discover::discover();
-        if next.usb == self.disc.usb && next.video == self.disc.video && next.iface == self.disc.iface {
+    fn sync_inventory(&mut self, force: bool) {
+        let inv = discover::discover_all();
+        let before = Inventory {
+            s7: self.s7.as_ref().map(|s| s.disc.clone()),
+            s3: self.s3.as_ref().map(|s| s.disc.clone()),
+        };
+        if !force && before.same_plug(&inv) {
             return;
         }
-        emit(serde_json::json!({
-            "event":"discover","ok": true, "usb": next.usb, "video": next.video,
-            "cameraIp": next.camera_ip, "iface": next.iface, "serial": next.serial,
-            "product": next.product
-        }));
-        if !next.usb {
-            self.preview = None;
-            self.client = None;
-            self.rpc.clear();
-            emit(serde_json::json!({"event":"disconnected","error":"unplugged"}));
-        } else if self.preview.is_some() && next.video != self.disc.video {
-            self.preview = None;
-            emit(serde_json::json!({"event":"preview","on": false}));
+        sync_slot(&mut self.s7, inv.s7.clone());
+        sync_slot(&mut self.s3, inv.s3.clone());
+        if self.slot(self.selected).is_none() {
+            self.selected = if self.s7.as_ref().is_some_and(|s| s.disc.usb) {
+                Model::S7
+            } else {
+                Model::S3
+            };
         }
-        self.disc = next;
+        self.emit_state();
+        if self.s7.is_none() && self.s3.is_none() {
+            emit(serde_json::json!({"event":"disconnected","error":"camera not on USB"}));
+        }
+    }
+
+    fn emit_state(&self) {
+        emit(inventory_json(
+            &Inventory {
+                s7: self.s7.as_ref().map(|s| s.disc.clone()),
+                s3: self.s3.as_ref().map(|s| s.disc.clone()),
+            },
+            self.selected,
+            self.s7.as_ref().is_some_and(|s| s.client.is_some()),
+            self.s3.as_ref().is_some_and(|s| s.client.is_some()),
+        ));
+        if let Some(s) = self.slot(self.selected) {
+            emit_cam(&s.disc, discover_json(&s.disc));
+            if !s.unsupported.is_empty() {
+                emit_cam(
+                    &s.disc,
+                    serde_json::json!({"event":"caps","unsupported": s.unsupported}),
+                );
+            }
+        }
+    }
+
+    fn target_model(&self, v: &serde_json::Value) -> Model {
+        if let Some(m) = v.get("model").and_then(|x| x.as_str()).and_then(parse_model) {
+            return m;
+        }
+        if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+            if self.s7.as_ref().is_some_and(|s| s.disc.serial == id) {
+                return Model::S7;
+            }
+            if self.s3.as_ref().is_some_and(|s| s.disc.serial == id) {
+                return Model::S3;
+            }
+        }
+        self.selected
     }
 
     #[allow(clippy::too_many_lines)]
@@ -498,15 +660,51 @@ impl Watch {
         let v: serde_json::Value =
             serde_json::from_str(line).map_err(|e| Error::Protocol(format!("json: {e}")))?;
         let cmd = v.get("cmd").and_then(|x| x.as_str()).unwrap_or("");
+        if cmd == "select" {
+            let model = self.target_model(&v);
+            if self.slot(model).is_none() {
+                return Err(Error::Invalid(format!("{model:?} not plugged")));
+            }
+            if self.selected != model {
+                if let Some(s) = self.slot_mut(self.selected) {
+                    if s.preview.is_some() {
+                        s.preview = None;
+                        emit_cam(&s.disc, serde_json::json!({"event":"preview","on": false}));
+                    }
+                }
+                self.selected = model;
+                if let Some(s) = self.slot_mut(model) {
+                    s.rpc.clear();
+                    s.fill.restart();
+                }
+                self.emit_state();
+            }
+            return Ok(None);
+        }
+        let model = self.target_model(&v);
         match cmd {
             "tab" => {
                 let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("exposure");
-                self.fill.set_tab(name);
+                if let Some(s) = self.slot_mut(model) {
+                    s.fill.set_tab(name);
+                }
                 Ok(None)
             }
             "get-all" => {
-                self.fill.refresh();
-                self.rpc.pending = None;
+                if let Some(s) = self.slot_mut(model) {
+                    s.rpc.pending = None;
+                    s.fill.restart();
+                }
+                Ok(None)
+            }
+            "refresh" => {
+                if let Some(s) = self.slot_mut(model) {
+                    s.rpc.pending = None;
+                    s.fill.refresh();
+                    if s.fill.is_done() {
+                        emit_cam(&s.disc, serde_json::json!({"event":"refreshed"}));
+                    }
+                }
                 Ok(None)
             }
             "set" => {
@@ -521,15 +719,34 @@ impl Watch {
                         other => other.to_string(),
                     })
                     .ok_or_else(|| Error::Invalid("value".into()))?;
+                if name == "wb-offset" {
+                    let r = v.get("r").and_then(serde_json::Value::as_u64).unwrap_or(10) as u32;
+                    let b = v.get("b").and_then(serde_json::Value::as_u64).unwrap_or(10) as u32;
+                    let s = self
+                        .slot_mut(model)
+                        .ok_or(Error::Disconnected("disconnected"))?;
+                    if s.client.is_none() {
+                        return Err(Error::Disconnected("disconnected"));
+                    }
+                    s.rpc.queued = Some(QueuedSet {
+                        name: "wb-offset",
+                        cid: 33,
+                        body: SetBody::Wb { r, b },
+                    });
+                    return Ok(None);
+                }
                 let p = params::find(name).ok_or_else(|| Error::Invalid(format!("unknown {name}")))?;
                 if !p.set_ok {
                     return Err(Error::Invalid(format!("{name} is read-only")));
                 }
-                if self.client.is_none() {
+                let s = self
+                    .slot_mut(model)
+                    .ok_or(Error::Disconnected("disconnected"))?;
+                if s.client.is_none() {
                     return Err(Error::Disconnected("disconnected"));
                 }
                 let wire = params::encode_named(p, raw.trim_matches('"'))?;
-                self.rpc.queued = Some(QueuedSet {
+                s.rpc.queued = Some(QueuedSet {
                     name: p.name,
                     cid: p.cid,
                     body: SetBody::Int(wire),
@@ -537,12 +754,14 @@ impl Watch {
                 Ok(None)
             }
             "af-target" | "af-area" => {
-                if self.client.is_none() {
+                let s = self
+                    .slot_mut(model)
+                    .ok_or(Error::Disconnected("disconnected"))?;
+                if s.client.is_none() {
                     return Err(Error::Disconnected("disconnected"));
                 }
                 let rect = json_norm_rect(&v)?;
-                // CID 34 is a notify. Both AF-S and AF-C write CID 24.
-                self.rpc.queued = Some(QueuedSet {
+                s.rpc.queued = Some(QueuedSet {
                     name: if cmd == "af-target" {
                         "focus-target"
                     } else {
@@ -554,12 +773,14 @@ impl Watch {
                 Ok(None)
             }
             "heartbeat" => {
-                if let Some(c) = self.client.as_mut() {
-                    if c.pace_ready() {
-                        match c.queue_heartbeat() {
-                            Ok(()) => {}
-                            Err(e) if e.is_transient_write() => {}
-                            Err(e) => return Err(e),
+                if let Some(s) = self.slot_mut(model) {
+                    if let Some(c) = s.client.as_mut() {
+                        if c.pace_ready() {
+                            match c.queue_heartbeat() {
+                                Ok(()) => {}
+                                Err(e) if e.is_transient_write() => {}
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
                 }
@@ -567,43 +788,160 @@ impl Watch {
             }
             "preview" => {
                 let on = v.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false);
+                let s = self
+                    .slot_mut(model)
+                    .ok_or_else(|| Error::Invalid("no YoloCam UVC device".into()))?;
                 if on {
-                    if self.preview.is_some() {
-                        return Ok(Some(serde_json::json!({"event":"preview","on": true})));
+                    if s.preview.is_some() {
+                        return Ok(Some(tagged(&s.disc, serde_json::json!({"event":"preview","on": true}))));
                     }
-                    let dev = self
+                    let dev = s
                         .disc
                         .video
                         .clone()
                         .ok_or_else(|| Error::Invalid("no YoloCam UVC device".into()))?;
-                    match Preview::start(&dev, 1280, 720, 15) {
+                    let serial = s.disc.serial.clone();
+                    match Preview::start_in(&dev, 1280, 720, 15, Some(serial.as_str())) {
                         Ok(p) => {
                             let dir = p.dir.clone();
-                            self.last_slot.clear();
-                            self.preview = Some(p);
-                            Ok(Some(serde_json::json!({"event":"preview","on": true, "device": dev, "dir": dir, "size": "1280x720"})))
+                            s.last_slot.clear();
+                            s.preview = Some(p);
+                            Ok(Some(tagged(
+                                &s.disc,
+                                serde_json::json!({"event":"preview","on": true, "device": dev, "dir": dir, "size": "1280x720"}),
+                            )))
                         }
                         Err(yolocam::Error::Busy) => {
                             let holder = yolocam::holders::summarize(&dev);
-                            Ok(Some(serde_json::json!({"event":"preview","on": false, "error": "busy", "holder": holder.name, "holderKind": holder.kind})))
+                            Ok(Some(tagged(
+                                &s.disc,
+                                serde_json::json!({"event":"preview","on": false, "error": "busy", "holder": holder.name, "holderKind": holder.kind}),
+                            )))
                         }
                         Err(e) => Err(e),
                     }
                 } else {
-                    self.preview = None;
-                    Ok(Some(serde_json::json!({"event":"preview","on": false})))
+                    s.preview = None;
+                    s.last_covered = None;
+                    Ok(Some(tagged(&s.disc, serde_json::json!({"event":"preview","on": false}))))
                 }
             }
             "reconnect" => {
-                self.rpc.clear();
-                // `open_client` emits connected or disconnected. Do not also
-                // emit connected when the TCP open failed.
-                self.client = open_client(&self.disc);
+                if let Some(s) = self.slot_mut(model) {
+                    s.rpc.clear();
+                    s.client = open_client(&s.disc);
+                }
                 Ok(None)
             }
             _ => Err(Error::Invalid(format!("unknown cmd {cmd}"))),
         }
     }
+}
+
+#[allow(clippy::struct_excessive_bools)]
+struct Hits {
+    stdin: bool,
+    ctl: bool,
+    plug: bool,
+    s7: bool,
+    s3: bool,
+}
+
+fn parse_model(s: &str) -> Option<Model> {
+    match s.to_ascii_lowercase().as_str() {
+        "s7" | "7" => Some(Model::S7),
+        "s3" | "3" => Some(Model::S3),
+        _ => None,
+    }
+}
+
+fn tagged(disc: &Discovery, mut v: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(m) = &mut v {
+        m.insert("model".into(), serde_json::json!(disc.model));
+        m.insert("id".into(), serde_json::json!(disc.serial));
+    }
+    v
+}
+
+fn emit_cam(disc: &Discovery, v: serde_json::Value) {
+    emit(tagged(disc, v));
+}
+
+fn discover_json(disc: &Discovery) -> serde_json::Value {
+    serde_json::json!({
+        "event": "discover",
+        "ok": true,
+        "usb": disc.usb,
+        "video": disc.video,
+        "cameraIp": disc.camera_ip,
+        "iface": disc.iface,
+        "serial": disc.serial,
+        "product": disc.product
+    })
+}
+
+fn inventory_json(inv: &Inventory, selected: Model, s7_ctrl: bool, s3_ctrl: bool) -> serde_json::Value {
+    let mut cameras = Vec::new();
+    for d in inv.plugged() {
+        let control = match d.model {
+            Model::S7 => s7_ctrl,
+            Model::S3 => s3_ctrl,
+        };
+        cameras.push(serde_json::json!({
+            "model": d.model,
+            "id": d.serial,
+            "usb": true,
+            "control": control,
+            "serial": d.serial,
+            "product": d.product,
+            "iface": d.iface,
+            "cameraIp": d.camera_ip,
+            "video": d.video
+        }));
+    }
+    serde_json::json!({
+        "event": "inventory",
+        "glyph": inv.glyph_code(),
+        "selected": selected,
+        "cameras": cameras
+    })
+}
+
+fn sync_slot(slot: &mut Option<Session>, next: Option<Discovery>) {
+    match (slot.as_ref().map(|s| s.disc.clone()), next) {
+        (None, None) => {}
+        (_, Some(d)) if !d.usb => {
+            *slot = None;
+        }
+        (None, Some(d)) => {
+            *slot = Some(Session::new(d));
+        }
+        (Some(_), None) => {
+            *slot = None;
+        }
+        (Some(cur), Some(d)) => {
+            if cur.serial == d.serial && cur.iface == d.iface && cur.video == d.video {
+                return;
+            }
+            if cur.serial != d.serial {
+                *slot = Some(Session::new(d));
+                return;
+            }
+            if let Some(s) = slot.as_mut() {
+                if s.preview.is_some() && s.disc.video != d.video {
+                    s.preview = None;
+                    emit_cam(&d, serde_json::json!({"event":"preview","on": false}));
+                }
+                s.disc = d;
+            }
+        }
+    }
+}
+
+fn disconnect_session(s: &mut Session, e: &Error) {
+    s.client = None;
+    s.rpc.clear();
+    emit_cam(&s.disc, serde_json::json!({"event":"disconnected","error": e.to_string()}));
 }
 
 fn open_client(disc: &Discovery) -> Option<Client> {
@@ -614,17 +952,23 @@ fn open_client(disc: &Discovery) -> Option<Client> {
         Ok(mut c) => {
             let _ = c.set_nonblocking(true);
             let _ = c.queue_heartbeat();
-            emit(serde_json::json!({"event":"connected"}));
+            emit_cam(disc, serde_json::json!({"event":"connected"}));
             Some(c)
         }
         Err(e) => {
-            emit(serde_json::json!({"event":"disconnected","error": e.to_string()}));
+            emit_cam(disc, serde_json::json!({"event":"disconnected","error": e.to_string()}));
             None
         }
     }
 }
 
-fn dispatch(focus: &mut FocusEmit, pending: &mut Option<Pending>, msgs: Vec<pb::Message>) {
+fn dispatch(
+    disc: &Discovery,
+    focus: &mut FocusEmit,
+    pending: &mut Option<Pending>,
+    unsupported: &mut Vec<&'static str>,
+    msgs: Vec<pb::Message>,
+) {
     for mut msg in msgs {
         if let Some(p) = pending.as_ref() {
             if msg.is_reply_to(p.seq, p.cid) {
@@ -632,11 +976,14 @@ fn dispatch(focus: &mut FocusEmit, pending: &mut Option<Pending>, msgs: Vec<pb::
                 let cid = p.cid;
                 let body = p.body;
                 *pending = None;
+                if msg.resp_code == 100 && matches!(body, RpcBody::Get) && !unsupported.contains(&name) {
+                    unsupported.push(name);
+                }
                 let value = set_param_value(name, body.set_wire(), &msg);
-                emit(serde_json::json!({"event":"param","name": name, "cid": cid, "resp": msg.resp_code, "value": value}));
+                emit_cam(disc, serde_json::json!({"event":"param","name": name, "cid": cid, "resp": msg.resp_code, "value": value}));
                 if let Some(r) = body.set_rect() {
                     if cid == params::FOCUS_AREA_CID || cid == params::FOCUS_TARGET_CID {
-                        emit(serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
+                        emit_cam(disc, serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
                     }
                 }
                 continue;
@@ -647,22 +994,22 @@ fn dispatch(focus: &mut FocusEmit, pending: &mut Option<Pending>, msgs: Vec<pb::
                 *rects = params::pick_primary_face(rects);
             }
             if let Some(ev) = focus.event("focus-box", &msg) {
-                emit(ev);
+                emit_cam(disc, ev);
             }
             continue;
         }
         if msg.is_notify() && msg.id == params::FOCUS_AREA_CID {
             if let Some(ev) = focus.event("focus-area", &msg) {
-                emit(ev);
+                emit_cam(disc, ev);
             }
             continue;
         }
         if let Some(p) = params::find_cid(msg.id) {
             if !msg.is_notify() {
-                emit(serde_json::json!({"event":"param","name":p.name,"cid":p.cid,"resp":msg.resp_code,"value": params::body_json(&msg)}));
+                emit_cam(disc, serde_json::json!({"event":"param","name":p.name,"cid":p.cid,"resp":msg.resp_code,"value": params::body_json(&msg)}));
             }
         } else if !msg.is_notify() {
-            emit(serde_json::json!({"event":"raw","cid":msg.id,"type":msg.ty.map(|t| t as u32),"resp":msg.resp_code,"value": params::body_json(&msg)}));
+            emit_cam(disc, serde_json::json!({"event":"raw","cid":msg.id,"type":msg.ty.map(|t| t as u32),"resp":msg.resp_code,"value": params::body_json(&msg)}));
         }
     }
 }
@@ -707,39 +1054,49 @@ impl FocusEmit {
     }
 }
 
-fn drain_preview(preview: &mut Option<Preview>, last_slot: &mut String, disc: &Discovery) {
-    let Some(p) = preview.as_ref() else {
+fn drain_preview(s: &mut Session) {
+    let Some(p) = s.preview.as_ref() else {
         return;
     };
     if let Ok(slot) = std::fs::read_to_string(p.dir.join("slot")) {
-        if slot != *last_slot {
-            last_slot.clone_from(&slot);
+        if slot != s.last_slot {
+            s.last_slot.clone_from(&slot);
             let file = if slot.trim() == "a" {
                 p.dir.join("preview-a.jpg")
             } else {
                 p.dir.join("preview-b.jpg")
             };
-            let covered =
-                std::fs::read_to_string(p.dir.join("covered")).is_ok_and(|s| s.trim() == "1");
-            emit(serde_json::json!({"event":"frame","slot": slot.trim(), "path": file, "covered": covered}));
+            let covered = std::fs::read_to_string(p.dir.join("covered")).is_ok_and(|s| s.trim() == "1");
+            emit_cam(
+                &s.disc,
+                serde_json::json!({"event":"frame","slot": slot.trim(), "path": file, "covered": covered}),
+            );
+            if s.last_covered != Some(covered) {
+                s.last_covered = Some(covered);
+                emit_cam(&s.disc, serde_json::json!({"event":"covered","on": covered}));
+            }
         }
     }
     if p.dir.join("error").exists() {
         if let Ok(e) = std::fs::read_to_string(p.dir.join("error")) {
             let err = e.trim().to_string();
             let holder = if err == "busy" {
-                disc.video.as_deref().map(yolocam::holders::summarize)
+                s.disc.video.as_deref().map(yolocam::holders::summarize)
             } else {
                 None
             };
-            emit(serde_json::json!({
-                "event":"preview-error",
-                "error": err,
-                "holder": holder.as_ref().map(|h| &h.name),
-                "holderKind": holder.as_ref().map(|h| h.kind)
-            }));
+            emit_cam(
+                &s.disc,
+                serde_json::json!({
+                    "event":"preview-error",
+                    "error": err,
+                    "holder": holder.as_ref().map(|h| &h.name),
+                    "holderKind": holder.as_ref().map(|h| h.kind)
+                }),
+            );
             let _ = std::fs::remove_file(p.dir.join("error"));
-            *preview = None;
+            s.preview = None;
+            s.last_covered = None;
         }
     }
 }
@@ -767,10 +1124,24 @@ impl Fill {
         self.urgent = false;
     }
 
+    fn restart(&mut self) {
+        self.at = 0;
+        self.order = params::fill_order(self.group);
+        self.urgent = true;
+    }
+
     fn refresh(&mut self) {
         self.at = 0;
         self.order = params::refresh_order(self.group);
         self.urgent = true;
+    }
+
+    fn is_urgent(&self) -> bool {
+        self.urgent
+    }
+
+    fn is_done(&self) -> bool {
+        self.at >= self.order.len()
     }
 
     fn set_tab(&mut self, tab: &str) {

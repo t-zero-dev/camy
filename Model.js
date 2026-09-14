@@ -1,5 +1,13 @@
 .pragma library
 
+function glyphCode(s3, s7) {
+  return (s3 ? 3 : 0) + (s7 ? 7 : 0)
+}
+
+function modelTitle(model) {
+  return String(model) === "s3" ? "YoloCam S3" : "YoloCam S7"
+}
+
 function helperPathFromUrl(url) {
   var s = String(url || "")
   if (s.indexOf("file://") === 0) s = s.substring(7)
@@ -111,6 +119,11 @@ var TABS = [
 
 function tabOptions() {
   return TABS.map(function(t) { return { value: t.id, label: t.label } })
+}
+
+function eventForSelected(ev, selectedModel) {
+  if (!ev || ev.model === undefined || ev.model === null || ev.model === "") return true
+  return String(ev.model) === String(selectedModel || "s7")
 }
 
 function afSize(mode, box) {
