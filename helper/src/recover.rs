@@ -36,9 +36,7 @@ fn telnet_exec(ip: &str, cmd: &str) -> Result<()> {
     stream
         .set_read_timeout(Some(Duration::from_millis(800)))
         .ok();
-    stream
-        .set_write_timeout(Some(Duration::from_secs(3)))
-        .ok();
+    stream.set_write_timeout(Some(Duration::from_secs(3))).ok();
     wait_contains(&mut stream, "login:")?;
     write_line(&mut stream, USER)?;
     wait_contains(&mut stream, "assword:")?;
@@ -74,7 +72,10 @@ fn wait_contains(stream: &mut TcpStream, needle: &str) -> Result<String> {
             Ok(n) => {
                 let chunk = eat_iac(stream, &raw[..n])?;
                 text.push_str(&String::from_utf8_lossy(&chunk));
-                if text.to_ascii_lowercase().contains(&needle.to_ascii_lowercase()) {
+                if text
+                    .to_ascii_lowercase()
+                    .contains(&needle.to_ascii_lowercase())
+                {
                     return Ok(text);
                 }
             }
@@ -136,7 +137,9 @@ mod tests {
 
     #[test]
     fn detects_refused() {
-        assert!(control_refused("connect 192.168.129.10:12345: Connection refused"));
+        assert!(control_refused(
+            "connect 192.168.129.10:12345: Connection refused"
+        ));
         assert!(control_refused("camera closed the socket"));
         assert!(!control_refused("timeout waiting for cid 7"));
     }

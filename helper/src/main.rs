@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use yolocam::client::{BlockingClient, Client};
 use yolocam::discover::{self, Discovery};
-use yolocam::params::{self, Kind};
+use yolocam::params::{self, Kind, ParamId, SetPayload};
 use yolocam::pb;
 use yolocam::preview::Preview;
 use yolocam::{Error, Result};
@@ -66,7 +66,7 @@ fn print_help() {
         "yolocam — YoloCam S7/S3 control\n\
          \n\
          Commands:\n\
-           status              USB, NCM, control port, firmware\n\
+           status              USB, gadget NIC, control port, firmware\n\
            probe               version handshake\n\
            list                named parameters\n\
            get <name...>       read parameters\n\
@@ -192,11 +192,11 @@ fn cmd_list() -> Result<()> {
                 "cid": p.cid,
                 "label": p.label,
                 "group": p.group,
-                "set": p.set_ok,
+                "set": p.kind.settable(),
                 "kind": match p.kind {
                     Kind::Int { min, max } => serde_json::json!({"type":"int","min":min,"max":max}),
                     Kind::Enum(opts) => serde_json::json!({"type":"enum","options": opts.iter().map(|(l,v)| serde_json::json!({"label":l,"value":v})).collect::<Vec<_>>()}),
-                    Kind::Info => serde_json::json!({"type":"info"}),
+                    Kind::GetOnly | Kind::WbOffset => serde_json::json!({"type":"info"}),
                 }
             })
         })
@@ -225,7 +225,8 @@ fn cmd_get(args: &[String]) -> Result<()> {
     let mut c = connect(&disc)?;
     let mut items = Vec::new();
     for name in args {
-        let p = params::find(name).ok_or_else(|| Error::Invalid(format!("unknown param {name}")))?;
+        let p =
+            params::find(name).ok_or_else(|| Error::Invalid(format!("unknown param {name}")))?;
         let msg = c.get(p.cid)?;
         items.push(param_object(p.name, &msg));
     }
@@ -242,11 +243,17 @@ fn cmd_dump_cids(args: &[String]) -> Result<()> {
     let disc = match rest.first().map(String::as_str) {
         Some("s3") => {
             rest = &rest[1..];
-            inv.s3.clone().filter(|d| d.usb).ok_or_else(|| Error::Invalid("no S3".into()))?
+            inv.s3
+                .clone()
+                .filter(|d| d.usb)
+                .ok_or_else(|| Error::Invalid("no S3".into()))?
         }
         Some("s7") => {
             rest = &rest[1..];
-            inv.s7.clone().filter(|d| d.usb).ok_or_else(|| Error::Invalid("no S7".into()))?
+            inv.s7
+                .clone()
+                .filter(|d| d.usb)
+                .ok_or_else(|| Error::Invalid("no S7".into()))?
         }
         _ => inv.primary(),
     };
@@ -285,7 +292,8 @@ fn cmd_get_all() -> Result<()> {
     for p in params::PARAMS {
         match c.get_within(p.cid, Duration::from_millis(280)) {
             Ok(msg) => items.push(param_object(p.name, &msg)),
-            Err(e) => items.push(serde_json::json!({"name": p.name, "cid": p.cid, "error": e.to_string()})),
+            Err(e) => items
+                .push(serde_json::json!({"name": p.name, "cid": p.cid, "error": e.to_string()})),
         }
     }
     ok(serde_json::json!({"items": items}));
@@ -300,12 +308,16 @@ fn cmd_set(args: &[String]) -> Result<()> {
 }
 
 fn cmd_set_alias(name: &str, args: &[String]) -> Result<()> {
-    let v = args.first().ok_or_else(|| Error::Invalid(format!("{name} <value>")))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Error::Invalid(format!("{name} <value>")))?;
     apply_set(name, v)
 }
 
 fn cmd_shutter(args: &[String]) -> Result<()> {
-    let v = args.first().ok_or_else(|| Error::Invalid("shutter <1/N or microseconds>".into()))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Error::Invalid("shutter <1/N or microseconds>".into()))?;
     let us = if let Some(rest) = v.strip_prefix("1/") {
         params::shutter_from_denom(
             rest.parse()
@@ -320,14 +332,16 @@ fn cmd_shutter(args: &[String]) -> Result<()> {
 }
 
 fn apply_set(name: &str, raw: &str) -> Result<()> {
-    let p = params::find(name).ok_or_else(|| Error::Invalid(format!("unknown param {name}")))?;
-    if !p.set_ok {
-        return Err(Error::Invalid(format!("{name} is read-only")));
-    }
+    let p = ParamId::parse(name)
+        .map(ParamId::spec)
+        .ok_or_else(|| Error::Invalid(format!("unknown param {name}")))?;
+    let payload = params::parse_set(p, &serde_json::json!({"name": name, "value": raw}))?;
+    let SetPayload::Int(wire) = payload else {
+        return Err(Error::Invalid(format!("{name} needs a structured value")));
+    };
     if watch_owns_control() {
         return cmd_ctl(&["set".into(), name.into(), raw.into()]);
     }
-    let wire = params::encode_named(p, raw)?;
     let disc = discover::discover();
     let mut c = connect(&disc)?;
     let mut msg = c.set(p.cid, wire)?;
@@ -347,7 +361,9 @@ fn cmd_preview(args: &[String]) -> Result<()> {
         }
         "start" => {
             let disc = discover::discover();
-            let dev = disc.video.ok_or_else(|| Error::Invalid("no YoloCam UVC device".into()))?;
+            let dev = disc
+                .video
+                .ok_or_else(|| Error::Invalid("no YoloCam UVC device".into()))?;
             let prev = Preview::start(&dev, 1280, 720, 15)?;
             ok(serde_json::json!({
                 "preview": "running",
@@ -355,7 +371,7 @@ fn cmd_preview(args: &[String]) -> Result<()> {
                 "dir": prev.dir,
                 "size": "1280x720"
             }));
-            // Foreground until SIGINT — used for spikes; watch owns the real path.
+            // Block until stdin closes. The panel uses `watch` for preview.
             let (tx, rx) = std::sync::mpsc::channel::<()>();
             ctrlc_stub(tx);
             let _ = rx.recv();
@@ -407,5 +423,3 @@ fn cmd_ctl(args: &[String]) -> Result<()> {
     ok(serde_json::json!({"sent": true}));
     Ok(())
 }
-
-

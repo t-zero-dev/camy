@@ -1,99 +1,217 @@
 //! Named camera parameters mapped onto Yunxi command IDs.
+//!
+//! `ParamId` is the only way to name a SET. Unknown CIDs are `Kind::GetOnly`.
 
 use crate::error::{Error, Result};
 use crate::pb::{Body, Message};
 
+macro_rules! define_params {
+    ($(
+        $variant:ident => $name:literal, $cid:expr, $label:literal, $group:literal, $kind:expr
+    ),+ $(,)?) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum ParamId {
+            $($variant,)+
+        }
+
+        impl ParamId {
+            pub const ALL: &'static [Self] = &[$(Self::$variant,)+];
+
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $name,)+
+                }
+            }
+
+            pub fn parse(s: &str) -> Option<Self> {
+                match s {
+                    $($name => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+
+        pub const PARAMS: &[Param] = &[
+            $(Param {
+                id: ParamId::$variant,
+                name: $name,
+                cid: $cid,
+                label: $label,
+                group: $group,
+                kind: $kind,
+            },)+
+        ];
+    };
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Param {
+    pub id: ParamId,
     pub name: &'static str,
     pub cid: u32,
     pub label: &'static str,
     pub group: &'static str,
     pub kind: Kind,
-    pub set_ok: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+/// GET body; SET must use the same shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Int { min: i32, max: i32 },
     Enum(&'static [(&'static str, u32)]),
-    Info,
+    GetOnly,
+    WbOffset,
 }
 
-pub const PARAMS: &[Param] = &[
-    Param { name: "firmware", cid: 1, label: "Firmware", group: "status", kind: Kind::Info, set_ok: false },
-    Param { name: "frame-rate", cid: 5, label: "Frame rate", group: "video", kind: Kind::Enum(&[("25", 25), ("30", 30), ("50", 50), ("60", 60)]), set_ok: true },
-    Param { name: "resolution", cid: 6, label: "Resolution", group: "video", kind: Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]), set_ok: true },
-    Param { name: "brightness", cid: 7, label: "Brightness", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "dynamic-range", cid: 102, label: "Dynamic range", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "sharpness", cid: 8, label: "Sharpness", group: "image", kind: Kind::Int { min: -10, max: 30 }, set_ok: true },
-    Param { name: "contrast", cid: 9, label: "Contrast", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "saturation", cid: 10, label: "Saturation", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "hue", cid: 11, label: "Hue", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "gamma", cid: 12, label: "Gamma", group: "image", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "distortion", cid: 26, label: "Distortion correction", group: "image", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "shading", cid: 27, label: "Vignette correction", group: "image", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "zoom", cid: 13, label: "Zoom", group: "zoom", kind: Kind::Int { min: 50, max: 98 }, set_ok: true },
-    Param { name: "exposure-mode", cid: 14, label: "Exposure", group: "exposure", kind: Kind::Enum(&[("auto", 0), ("manual", 1)]), set_ok: true },
-    Param { name: "ev", cid: 15, label: "EV", group: "exposure", kind: Kind::Int { min: 0, max: 16 }, set_ok: true },
-    Param { name: "anti-flicker", cid: 16, label: "Anti-flicker", group: "exposure", kind: Kind::Enum(&[("off", 0), ("50hz", 1), ("60hz", 2)]), set_ok: true },
-    Param { name: "iso", cid: 17, label: "ISO", group: "exposure", kind: Kind::Int { min: 100, max: 12800 }, set_ok: true },
-    Param { name: "shutter-us", cid: 18, label: "Shutter (µs)", group: "exposure", kind: Kind::Int { min: 125, max: 40000 }, set_ok: true },
-    Param { name: "aperture", cid: 20, label: "Aperture", group: "exposure", kind: Kind::Int { min: 0, max: 160 }, set_ok: true },
-    Param { name: "wb-mode", cid: 21, label: "White balance", group: "wb", kind: Kind::Enum(&[("manual", 0), ("auto", 1)]), set_ok: true },
-    Param { name: "wb-temp", cid: 22, label: "Color temp", group: "wb", kind: Kind::Int { min: 2000, max: 10000 }, set_ok: true },
-    Param { name: "wb-tone", cid: 105, label: "Tone", group: "wb", kind: Kind::Int { min: 0, max: 128 }, set_ok: true },
-    Param { name: "focus-mode", cid: 23, label: "Focus", group: "focus", kind: Kind::Enum(&[("afs", 1), ("manual", 2), ("afc", 3), ("face", 4)]), set_ok: true },
-    Param { name: "manu-focus", cid: 111, label: "Manual focus", group: "focus", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "aperture-range", cid: 31, label: "Aperture range", group: "status", kind: Kind::Info, set_ok: false },
-    Param { name: "shutter-range", cid: 32, label: "Shutter range", group: "status", kind: Kind::Info, set_ok: false },
-    Param { name: "wb-offset", cid: 33, label: "WB offset", group: "wb", kind: Kind::Info, set_ok: false },
-    Param { name: "focus-box", cid: 38, label: "Focus box", group: "focus", kind: Kind::Enum(&[("large", 0), ("medium", 1), ("small", 2)]), set_ok: true },
-    Param { name: "caf", cid: 42, label: "Continuous AF", group: "focus", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "focus-speed", cid: 47, label: "Focus speed", group: "focus", kind: Kind::Enum(&[("fast", 1), ("medium", 3), ("slow", 5)]), set_ok: true },
-    Param { name: "lens-status", cid: 48, label: "Lens", group: "status", kind: Kind::Info, set_ok: false },
-    Param { name: "usb-version", cid: 60, label: "USB", group: "status", kind: Kind::Info, set_ok: false },
-    Param { name: "hdmi-format", cid: 61, label: "HDMI format", group: "video", kind: Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]), set_ok: true },
-    Param { name: "lens-detail", cid: 63, label: "Lens detail", group: "status", kind: Kind::Info, set_ok: false },
-    Param { name: "hdmi-color", cid: 65, label: "HDMI color", group: "video", kind: Kind::Enum(&[("auto", 0), ("rgb", 1), ("yuv422", 2)]), set_ok: true },
-    Param { name: "audio-volume", cid: 73, label: "Audio volume", group: "audio", kind: Kind::Int { min: 0, max: 100 }, set_ok: true },
-    Param { name: "audio-denoise", cid: 75, label: "Denoise", group: "audio", kind: Kind::Enum(&[("off", 0), ("weak", 1), ("middle", 2), ("strong", 3)]), set_ok: true },
-    Param { name: "audio-reverb", cid: 76, label: "Reverb", group: "audio", kind: Kind::Enum(&[("off", 0), ("weak", 1), ("middle", 2), ("strong", 3)]), set_ok: true },
-    Param { name: "audio-delay", cid: 77, label: "Audio delay ms", group: "audio", kind: Kind::Int { min: 0, max: 400 }, set_ok: true },
-    Param { name: "audio-agc", cid: 78, label: "Auto gain", group: "audio", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "mic-type", cid: 79, label: "Mic type", group: "audio", kind: Kind::Enum(&[("line", 0), ("mic", 1)]), set_ok: true },
-    Param { name: "clut", cid: 94, label: "Color LUT", group: "image", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "clut-mix", cid: 96, label: "LUT mix", group: "image", kind: Kind::Int { min: 0, max: 255 }, set_ok: true },
-    Param { name: "hdr", cid: 98, label: "HDR", group: "exposure", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "wb-lock", cid: 104, label: "WB lock", group: "wb", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "exposure-lock", cid: 106, label: "Exposure lock", group: "exposure", kind: Kind::Enum(&[("off", 0), ("on", 1)]), set_ok: true },
-    Param { name: "zoom-speed", cid: 112, label: "Zoom speed", group: "zoom", kind: Kind::Int { min: 1, max: 5 }, set_ok: true },
+impl Kind {
+    pub fn settable(self) -> bool {
+        !matches!(self, Self::GetOnly)
+    }
+}
+
+impl ParamId {
+    pub fn spec(self) -> &'static Param {
+        PARAMS
+            .iter()
+            .find(|p| p.id == self)
+            .expect("ParamId and PARAMS are generated together")
+    }
+}
+
+impl std::fmt::Display for ParamId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ParamId {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::parse(s).ok_or_else(|| Error::Invalid(format!("unknown param {s}")))
+    }
+}
+
+define_params! {
+    Firmware => "firmware", 1, "Firmware", "status", Kind::GetOnly,
+    FrameRate => "frame-rate", 5, "Frame rate", "video", Kind::Enum(&[("25", 25), ("30", 30), ("50", 50), ("60", 60)]),
+    Resolution => "resolution", 6, "Resolution", "video", Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]),
+    Brightness => "brightness", 7, "Brightness", "image", Kind::Int { min: 0, max: 100 },
+    DynamicRange => "dynamic-range", 102, "Dynamic range", "image", Kind::Int { min: 0, max: 100 },
+    Sharpness => "sharpness", 8, "Sharpness", "image", Kind::Int { min: -10, max: 30 },
+    Contrast => "contrast", 9, "Contrast", "image", Kind::Int { min: 0, max: 100 },
+    Saturation => "saturation", 10, "Saturation", "image", Kind::Int { min: 0, max: 100 },
+    Hue => "hue", 11, "Hue", "image", Kind::Int { min: 0, max: 100 },
+    Gamma => "gamma", 12, "Gamma", "image", Kind::Int { min: 0, max: 100 },
+    Distortion => "distortion", 26, "Distortion correction", "image", Kind::Enum(&[("off", 0), ("on", 1)]),
+    Shading => "shading", 27, "Vignette correction", "image", Kind::Enum(&[("off", 0), ("on", 1)]),
+    Zoom => "zoom", 13, "Zoom", "zoom", Kind::Int { min: 50, max: 98 },
+    ExposureMode => "exposure-mode", 14, "Exposure", "exposure", Kind::Enum(&[("auto", 0), ("manual", 1)]),
+    Ev => "ev", 15, "EV", "exposure", Kind::Int { min: 0, max: 16 },
+    AntiFlicker => "anti-flicker", 16, "Anti-flicker", "exposure", Kind::Enum(&[("off", 0), ("50hz", 1), ("60hz", 2)]),
+    Iso => "iso", 17, "ISO", "exposure", Kind::Int { min: 100, max: 12800 },
+    ShutterUs => "shutter-us", 18, "Shutter (µs)", "exposure", Kind::Int { min: 125, max: 40000 },
+    Aperture => "aperture", 20, "Aperture", "exposure", Kind::Int { min: 0, max: 160 },
+    WbMode => "wb-mode", 21, "White balance", "wb", Kind::Enum(&[("manual", 0), ("auto", 1)]),
+    WbTemp => "wb-temp", 22, "Color temp", "wb", Kind::Int { min: 2000, max: 10000 },
+    WbTone => "wb-tone", 105, "Tone", "wb", Kind::Int { min: 0, max: 128 },
+    FocusMode => "focus-mode", 23, "Focus", "focus", Kind::Enum(&[("afs", 1), ("manual", 2), ("afc", 3), ("face", 4)]),
+    ManuFocus => "manu-focus", 111, "Manual focus", "focus", Kind::Int { min: 0, max: 100 },
+    ApertureRange => "aperture-range", 31, "Aperture range", "status", Kind::GetOnly,
+    ShutterRange => "shutter-range", 32, "Shutter range", "status", Kind::GetOnly,
+    WbOffset => "wb-offset", 33, "WB offset", "wb", Kind::WbOffset,
+    FocusBox => "focus-box", 38, "Focus box", "focus", Kind::Enum(&[("large", 0), ("medium", 1), ("small", 2)]),
+    Caf => "caf", 42, "Continuous AF", "focus", Kind::Enum(&[("off", 0), ("on", 1)]),
+    FocusSpeed => "focus-speed", 47, "Focus speed", "focus", Kind::Enum(&[("fast", 1), ("medium", 3), ("slow", 5)]),
+    LensStatus => "lens-status", 48, "Lens", "status", Kind::GetOnly,
+    UsbVersion => "usb-version", 60, "USB", "status", Kind::GetOnly,
+    HdmiFormat => "hdmi-format", 61, "HDMI format", "video", Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]),
+    LensDetail => "lens-detail", 63, "Lens detail", "status", Kind::GetOnly,
+    HdmiColor => "hdmi-color", 65, "HDMI color", "video", Kind::Enum(&[("auto", 0), ("rgb", 1), ("yuv422", 2)]),
+    AudioVolume => "audio-volume", 73, "Audio volume", "audio", Kind::Int { min: 0, max: 100 },
+    AudioDenoise => "audio-denoise", 75, "Denoise", "audio", Kind::Enum(&[("off", 0), ("weak", 1), ("middle", 2), ("strong", 3)]),
+    AudioReverb => "audio-reverb", 76, "Reverb", "audio", Kind::Enum(&[("off", 0), ("weak", 1), ("middle", 2), ("strong", 3)]),
+    AudioDelay => "audio-delay", 77, "Audio delay ms", "audio", Kind::Int { min: 0, max: 400 },
+    AudioAgc => "audio-agc", 78, "Auto gain", "audio", Kind::Enum(&[("off", 0), ("on", 1)]),
+    MicType => "mic-type", 79, "Mic type", "audio", Kind::Enum(&[("line", 0), ("mic", 1)]),
+    Clut => "clut", 94, "Color LUT", "image", Kind::Enum(&[("off", 0), ("on", 1)]),
+    ClutMix => "clut-mix", 96, "LUT mix", "image", Kind::Int { min: 0, max: 255 },
+    Hdr => "hdr", 98, "HDR", "exposure", Kind::Enum(&[("off", 0), ("on", 1)]),
+    WbLock => "wb-lock", 104, "WB lock", "wb", Kind::Enum(&[("off", 0), ("on", 1)]),
+    ExposureLock => "exposure-lock", 106, "Exposure lock", "exposure", Kind::Enum(&[("off", 0), ("on", 1)]),
+    ZoomSpeed => "zoom-speed", 112, "Zoom speed", "zoom", Kind::Int { min: 1, max: 5 },
+}
+
+/// SET body accepted by `parse_set` for a named parameter.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SetPayload {
+    Int(u32),
+    Wb { r: u32, b: u32 },
+    Rect(crate::pb::RectF),
+}
+
+impl SetPayload {
+    pub fn set_wire(self) -> Option<u32> {
+        match self {
+            Self::Int(w) => Some(w),
+            Self::Rect(_) | Self::Wb { .. } => None,
+        }
+    }
+
+    pub fn set_rect(self) -> Option<crate::pb::RectF> {
+        match self {
+            Self::Rect(r) => Some(r),
+            Self::Int(_) | Self::Wb { .. } => None,
+        }
+    }
+
+    pub fn set_wb(self) -> Option<(u32, u32)> {
+        match self {
+            Self::Wb { r, b } => Some((r, b)),
+            Self::Int(_) | Self::Rect(_) => None,
+        }
+    }
+}
+
+pub const S3_UNSUPPORTED: &[ParamId] = &[
+    ParamId::Hue,
+    ParamId::Gamma,
+    ParamId::Zoom,
+    ParamId::LensDetail,
+    ParamId::MicType,
+    ParamId::AudioVolume,
+    ParamId::AudioDenoise,
+    ParamId::AudioReverb,
+    ParamId::AudioDelay,
+    ParamId::AudioAgc,
+    ParamId::HdmiFormat,
+    ParamId::HdmiColor,
+    ParamId::Brightness,
+    ParamId::Distortion,
+    ParamId::Clut,
+    ParamId::ClutMix,
 ];
 
 /// Enough for the first paint. Stay well under the ~25-request crash threshold.
-pub const WARM: &[&str] = &[
-    "iso",
-    "shutter-us",
-    "zoom",
-    "focus-mode",
-    "firmware",
-    "focus-box",
-    "exposure-mode",
-    "ev",
-    "wb-mode",
-    "wb-temp",
-    "wb-tone",
-    "brightness",
-    "dynamic-range",
-    "manu-focus",
-    "contrast",
-    "distortion",
-    "shading",
+pub const WARM: &[ParamId] = &[
+    ParamId::Iso,
+    ParamId::ShutterUs,
+    ParamId::Zoom,
+    ParamId::FocusMode,
+    ParamId::Firmware,
+    ParamId::FocusBox,
+    ParamId::ExposureMode,
+    ParamId::Ev,
+    ParamId::WbMode,
+    ParamId::WbTemp,
+    ParamId::WbTone,
+    ParamId::Brightness,
+    ParamId::DynamicRange,
+    ParamId::ManuFocus,
+    ParamId::Contrast,
+    ParamId::Distortion,
+    ParamId::Shading,
 ];
-
-pub fn is_warm(name: &str) -> bool {
-    WARM.contains(&name)
-}
 
 pub fn tab_group(tab: &str) -> &'static str {
     match tab {
@@ -112,8 +230,8 @@ pub fn tab_group(tab: &str) -> &'static str {
 pub fn fill_order(group: &str) -> Vec<usize> {
     let mut out = Vec::new();
     let mut seen = vec![false; PARAMS.len()];
-    for name in WARM {
-        if let Some(i) = PARAMS.iter().position(|p| p.name == *name) {
+    for &id in WARM {
+        if let Some(i) = PARAMS.iter().position(|p| p.id == id) {
             if !seen[i] {
                 seen[i] = true;
                 out.push(i);
@@ -134,14 +252,15 @@ pub fn fill_order(group: &str) -> Vec<usize> {
     out
 }
 
-/// Panel Refresh: current tab only. Skip bulky Info (`lens-detail`).
+/// Panel Refresh: current tab only. Skip bulky GetOnly (`lens-detail`) and WbOffset.
 pub fn refresh_order(group: &str) -> Vec<usize> {
     PARAMS
         .iter()
         .enumerate()
         .filter(|(_, p)| p.group == group)
-        .filter(|(_, p)| p.name != "lens-detail")
-        .filter(|(_, p)| group == "status" || !matches!(p.kind, Kind::Info))
+        .filter(|(_, p)| p.id != ParamId::LensDetail)
+        .filter(|(_, p)| !matches!(p.kind, Kind::WbOffset))
+        .filter(|(_, p)| group == "status" || !matches!(p.kind, Kind::GetOnly))
         .map(|(i, _)| i)
         .collect()
 }
@@ -174,9 +293,11 @@ pub fn pick_primary_face(rects: &[crate::pb::RectF]) -> Vec<crate::pb::RectF> {
     if rects.len() <= 1 {
         return rects.to_vec();
     }
-    let best = rects
-        .iter()
-        .max_by(|a, b| face_score(a).partial_cmp(&face_score(b)).unwrap_or(std::cmp::Ordering::Equal));
+    let best = rects.iter().max_by(|a, b| {
+        face_score(a)
+            .partial_cmp(&face_score(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     best.copied().into_iter().collect()
 }
 
@@ -220,7 +341,12 @@ pub fn box_at(cx: f32, cy: f32, size: f32) -> crate::pb::RectF {
     let size = size.clamp(0.03, 1.0);
     let x = (cx - size * 0.5).clamp(0.0, 1.0 - size);
     let y = (cy - size * 0.5).clamp(0.0, 1.0 - size);
-    crate::pb::RectF { x, y, w: size, h: size }
+    crate::pb::RectF {
+        x,
+        y,
+        w: size,
+        h: size,
+    }
 }
 
 /// Keep a user rect inside the unit square. Degenerate sizes expand to 0.03.
@@ -253,11 +379,59 @@ pub fn clamp_norm_rect(r: crate::pb::RectF) -> crate::pb::RectF {
 }
 
 pub fn find(name: &str) -> Option<&'static Param> {
-    PARAMS.iter().find(|p| p.name == name)
+    ParamId::parse(name).map(ParamId::spec)
 }
 
 pub fn find_cid(cid: u32) -> Option<&'static Param> {
     PARAMS.iter().find(|p| p.cid == cid)
+}
+
+/// Unknown CIDs cannot be SET. Named params use their `Kind`.
+pub fn kind_for_cid(cid: u32) -> Kind {
+    find_cid(cid).map_or(Kind::GetOnly, |p| p.kind)
+}
+
+/// Parse a JSON `set` object into the body this param's GET kind accepts.
+pub fn parse_set(param: &Param, v: &serde_json::Value) -> Result<SetPayload> {
+    match param.kind {
+        Kind::GetOnly => Err(Error::Invalid(format!("{} is read-only", param.name))),
+        Kind::WbOffset => parse_wb_offset(v),
+        Kind::Int { .. } | Kind::Enum(_) => {
+            let raw = v
+                .get("value")
+                .map(|x| match x {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .ok_or_else(|| Error::Invalid("value".into()))?;
+            Ok(SetPayload::Int(encode_named(param, raw.trim_matches('"'))?))
+        }
+    }
+}
+
+fn parse_wb_offset(v: &serde_json::Value) -> Result<SetPayload> {
+    if let Some((r, b)) = wb_pair(v) {
+        return Ok(SetPayload::Wb { r, b });
+    }
+    if let Some(val) = v.get("value") {
+        if let Some((r, b)) = wb_pair(val) {
+            return Ok(SetPayload::Wb { r, b });
+        }
+        return Err(Error::Invalid("wb-offset needs r and b, not an int".into()));
+    }
+    Err(Error::Invalid("wb-offset needs r and b".into()))
+}
+
+fn wb_pair(v: &serde_json::Value) -> Option<(u32, u32)> {
+    Some((json_u32(v.get("r"))?, json_u32(v.get("b"))?))
+}
+
+fn json_u32(v: Option<&serde_json::Value>) -> Option<u32> {
+    let v = v?;
+    if let Some(n) = v.as_u64() {
+        return u32::try_from(n).ok();
+    }
+    v.as_str()?.parse().ok()
 }
 
 /// Sharpness UI -10..30 is sent as 0-30 or 61-70 on the wire.
@@ -270,31 +444,51 @@ pub fn encode_value(param: &Param, value: i32) -> Result<u32> {
                     param.name
                 )));
             }
-            if param.name == "sharpness" && value < 0 {
+            if param.id == ParamId::Sharpness && value < 0 {
                 return Ok((61 + (-1 - value)) as u32); // -1 => 61, -10 => 70
             }
             Ok(value as u32)
         }
         Kind::Enum(opts) => {
-            if let Some((_, v)) = opts.iter().find(|(l, n)| *l == value.to_string() || *n == value as u32) {
+            if let Some((_, v)) = opts
+                .iter()
+                .find(|(l, n)| *l == value.to_string() || *n == value as u32)
+            {
                 Ok(*v)
             } else if opts.iter().any(|(_, n)| *n == value as u32) {
                 Ok(value as u32)
             } else {
-                Err(Error::Invalid(format!("invalid {} value {value}", param.name)))
+                Err(Error::Invalid(format!(
+                    "invalid {} value {value}",
+                    param.name
+                )))
             }
         }
-        Kind::Info => Err(Error::Invalid(format!("{} is read-only", param.name))),
+        Kind::GetOnly => Err(Error::Invalid(format!("{} is read-only", param.name))),
+        Kind::WbOffset => Err(Error::Invalid(format!(
+            "{} needs r and b, not an int",
+            param.name
+        ))),
     }
 }
 
 pub fn encode_named(param: &Param, raw: &str) -> Result<u32> {
+    match param.kind {
+        Kind::GetOnly => return Err(Error::Invalid(format!("{} is read-only", param.name))),
+        Kind::WbOffset => {
+            return Err(Error::Invalid(format!(
+                "{} needs r and b, not an int",
+                param.name
+            )));
+        }
+        Kind::Int { .. } | Kind::Enum(_) => {}
+    }
     if let Kind::Enum(opts) = param.kind {
         if let Some((_, v)) = opts.iter().find(|(l, _)| l.eq_ignore_ascii_case(raw)) {
             return Ok(*v);
         }
     }
-    if param.name == "zoom" {
+    if param.id == ParamId::Zoom {
         if let Ok(m) = raw.parse::<f64>() {
             if (1.0..=4.0).contains(&m) && m < 50.0 {
                 return Ok(zoom_raw(m));
@@ -308,7 +502,7 @@ pub fn encode_named(param: &Param, raw: &str) -> Result<u32> {
 }
 
 pub fn decode_int(param: &Param, wire: u32) -> i32 {
-    if param.name == "sharpness" && (61..=70).contains(&wire) {
+    if param.id == ParamId::Sharpness && (61..=70).contains(&wire) {
         return -1 - (wire as i32 - 61); // 61 => -1, 70 => -10
     }
     wire as i32
@@ -337,7 +531,12 @@ pub fn body_json(msg: &Message) -> serde_json::Value {
             let map: serde_json::Map<String, serde_json::Value> = l
                 .raw
                 .iter()
-                .map(|(f, b)| (f.to_string(), serde_json::json!(String::from_utf8_lossy(b).trim_end_matches('\0'))))
+                .map(|(f, b)| {
+                    (
+                        f.to_string(),
+                        serde_json::json!(String::from_utf8_lossy(b).trim_end_matches('\0')),
+                    )
+                })
                 .collect();
             serde_json::Value::Object(map)
         }
@@ -360,15 +559,38 @@ fn hex(data: &[u8]) -> String {
 }
 
 pub const SHUTTER_TABLE: &[(u32, u32)] = &[
-    (8000, 125), (6400, 156), (5000, 200), (4000, 250), (3200, 312), (2500, 400),
-    (2000, 500), (1600, 625), (1250, 800), (1000, 1000), (800, 1250), (640, 1562),
-    (500, 2000), (400, 2500), (320, 3125), (250, 4000), (200, 5000), (160, 6250),
-    (125, 8000), (100, 10000), (80, 12500), (60, 16666), (50, 20000), (30, 33333),
+    (8000, 125),
+    (6400, 156),
+    (5000, 200),
+    (4000, 250),
+    (3200, 312),
+    (2500, 400),
+    (2000, 500),
+    (1600, 625),
+    (1250, 800),
+    (1000, 1000),
+    (800, 1250),
+    (640, 1562),
+    (500, 2000),
+    (400, 2500),
+    (320, 3125),
+    (250, 4000),
+    (200, 5000),
+    (160, 6250),
+    (125, 8000),
+    (100, 10000),
+    (80, 12500),
+    (60, 16666),
+    (50, 20000),
+    (30, 33333),
     (25, 40000),
 ];
 
 pub fn shutter_from_denom(denom: u32) -> Option<u32> {
-    SHUTTER_TABLE.iter().find(|(d, _)| *d == denom).map(|(_, us)| *us)
+    SHUTTER_TABLE
+        .iter()
+        .find(|(d, _)| *d == denom)
+        .map(|(_, us)| *us)
 }
 
 pub fn denom_from_us(us: u32) -> u32 {
@@ -388,18 +610,91 @@ pub fn zoom_raw(mult: f64) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::pick_primary_face;
+    use super::{kind_for_cid, parse_set, pick_primary_face, Kind, ParamId, SetPayload};
     use crate::pb::RectF;
+    use serde_json::json;
+
+    #[test]
+    fn param_id_roundtrip() {
+        assert_eq!(ParamId::ALL.len(), super::PARAMS.len());
+        for (i, p) in super::PARAMS.iter().enumerate() {
+            assert_eq!(ParamId::ALL[i], p.id);
+            assert_eq!(ParamId::parse(p.name), Some(p.id));
+            assert_eq!(p.id.as_str(), p.name);
+            assert_eq!(p.id.spec().cid, p.cid);
+            assert_eq!(p.id.spec().name, p.name);
+        }
+        assert!(ParamId::parse("color-style").is_none());
+        assert!(ParamId::parse("focus-enhance").is_none());
+    }
+
+    #[test]
+    fn parse_set_getonly_fails() {
+        let p = ParamId::Firmware.spec();
+        assert!(parse_set(p, &json!({"name": "firmware", "value": "1"})).is_err());
+        assert!(super::encode_named(p, "1").is_err());
+        assert!(!p.kind.settable());
+    }
+
+    #[test]
+    fn parse_set_wb_rejects_int() {
+        let p = ParamId::WbOffset.spec();
+        assert!(parse_set(p, &json!({"name": "wb-offset", "value": "10"})).is_err());
+        assert!(parse_set(p, &json!({"name": "wb-offset", "value": 10})).is_err());
+        assert!(super::encode_named(p, "10").is_err());
+        assert!(super::encode_value(p, 10).is_err());
+        let ok = parse_set(p, &json!({"name": "wb-offset", "r": 8, "b": 12})).unwrap();
+        assert_eq!(ok, SetPayload::Wb { r: 8, b: 12 });
+        let nested =
+            parse_set(p, &json!({"name": "wb-offset", "value": {"r": 1, "b": 2}})).unwrap();
+        assert_eq!(nested, SetPayload::Wb { r: 1, b: 2 });
+        assert!(p.kind.settable());
+    }
+
+    #[test]
+    fn parse_set_int_ok() {
+        let p = ParamId::Iso.spec();
+        assert_eq!(
+            parse_set(p, &json!({"name": "iso", "value": "400"})).unwrap(),
+            SetPayload::Int(400)
+        );
+        assert_eq!(
+            parse_set(p, &json!({"cmd": "set", "name": "iso", "value": 200})).unwrap(),
+            SetPayload::Int(200)
+        );
+    }
+
+    #[test]
+    fn unknown_cid_is_getonly() {
+        assert!(matches!(kind_for_cid(55), Kind::GetOnly));
+        assert!(matches!(kind_for_cid(58), Kind::GetOnly));
+        assert!(matches!(kind_for_cid(29), Kind::GetOnly));
+        assert!(!kind_for_cid(55).settable());
+        assert!(matches!(kind_for_cid(17), Kind::Int { .. }));
+        assert!(matches!(kind_for_cid(33), Kind::WbOffset));
+    }
 
     #[test]
     fn fill_order_puts_warm_first() {
         let order = super::fill_order("audio");
-        assert_eq!(super::PARAMS[order[0]].name, "iso");
-        assert_eq!(super::PARAMS[order[1]].name, "shutter-us");
-        let iso = order.iter().position(|&i| super::PARAMS[i].name == "iso").unwrap();
-        let zoom = order.iter().position(|&i| super::PARAMS[i].name == "zoom").unwrap();
-        let focus = order.iter().position(|&i| super::PARAMS[i].name == "focus-mode").unwrap();
-        let vol = order.iter().position(|&i| super::PARAMS[i].name == "audio-volume").unwrap();
+        assert_eq!(super::PARAMS[order[0]].id, ParamId::Iso);
+        assert_eq!(super::PARAMS[order[1]].id, ParamId::ShutterUs);
+        let iso = order
+            .iter()
+            .position(|&i| super::PARAMS[i].id == ParamId::Iso)
+            .unwrap();
+        let zoom = order
+            .iter()
+            .position(|&i| super::PARAMS[i].id == ParamId::Zoom)
+            .unwrap();
+        let focus = order
+            .iter()
+            .position(|&i| super::PARAMS[i].id == ParamId::FocusMode)
+            .unwrap();
+        let vol = order
+            .iter()
+            .position(|&i| super::PARAMS[i].id == ParamId::AudioVolume)
+            .unwrap();
         assert!(iso < vol && zoom < vol && focus < vol);
         assert!(order.iter().any(|&i| super::PARAMS[i].group == "audio"));
     }
@@ -416,18 +711,23 @@ mod tests {
         let image = super::refresh_order("image");
         assert!(!image.is_empty());
         assert!(image.iter().all(|&i| super::PARAMS[i].group == "image"));
-        assert!(image
-            .iter()
-            .all(|&i| !matches!(super::PARAMS[i].kind, super::Kind::Info)));
+        assert!(image.iter().all(|&i| !matches!(
+            super::PARAMS[i].kind,
+            super::Kind::GetOnly | super::Kind::WbOffset
+        )));
         assert!(image.len() < super::fill_order("image").len());
 
         let status = super::refresh_order("status");
-        assert!(status.iter().any(|&i| super::PARAMS[i].name == "firmware"));
+        assert!(status
+            .iter()
+            .any(|&i| super::PARAMS[i].id == ParamId::Firmware));
         assert!(status.iter().all(|&i| super::PARAMS[i].group == "status"));
-        assert!(status.iter().all(|&i| super::PARAMS[i].name != "lens-detail"));
+        assert!(status
+            .iter()
+            .all(|&i| super::PARAMS[i].id != ParamId::LensDetail));
 
         let wb = super::refresh_order("wb");
-        assert!(wb.iter().all(|&i| super::PARAMS[i].name != "wb-offset"));
+        assert!(wb.iter().all(|&i| super::PARAMS[i].id != ParamId::WbOffset));
     }
 
     #[test]

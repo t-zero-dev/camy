@@ -34,7 +34,10 @@ impl WriteBuf {
                 Ok(0) => return Err(Error::Disconnected("camera closed the socket")),
                 Ok(n) => self.off += n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
                     return Ok(());
                 }
                 Err(e) => return Err(Error::io_ctx(e, "write")),
@@ -57,7 +60,9 @@ pub struct Client {
 impl Client {
     pub fn connect(addr: &str, timeout: Duration) -> Result<Self> {
         let stream = TcpStream::connect_timeout(
-            &addr.parse().map_err(|e| Error::Protocol(format!("addr: {e}")))?,
+            &addr
+                .parse()
+                .map_err(|e| Error::Protocol(format!("addr: {e}")))?,
             timeout,
         )
         .map_err(|e| Error::io_ctx(e, format!("connect {addr}")))?;
@@ -65,9 +70,7 @@ impl Client {
         stream
             .set_read_timeout(Some(Duration::from_millis(250)))
             .ok();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(3)))
-            .ok();
+        stream.set_write_timeout(Some(Duration::from_secs(3))).ok();
         Ok(Self {
             stream,
             buf: Vec::new(),
@@ -169,9 +172,15 @@ impl Client {
                 }
                 self.buf.extend_from_slice(&tmp[..n]);
                 let payloads = wire::drain(&mut self.buf)?;
-                payloads.into_iter().map(|p| pb::decode_message(&p)).collect()
+                payloads
+                    .into_iter()
+                    .map(|p| pb::decode_message(&p))
+                    .collect()
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
                 Ok(Vec::new())
             }
             Err(e) => Err(Error::io_ctx(e, "read")),

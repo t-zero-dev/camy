@@ -72,7 +72,10 @@ pub fn drain(buf: &mut Vec<u8>) -> Result<Vec<Vec<u8>>> {
         if proto_size > MAX_FRAME {
             return Err(Error::Protocol("frame too large".into()));
         }
-        let Some(need) = 14usize.checked_add(proto_size).and_then(|n| n.checked_add(2)) else {
+        let Some(need) = 14usize
+            .checked_add(proto_size)
+            .and_then(|n| n.checked_add(2))
+        else {
             return Err(Error::Protocol("frame too large".into()));
         };
         if need > total {
@@ -104,7 +107,10 @@ mod tests {
     fn wrap_matches_captured_get_version() {
         let msg = pb::request(1, 1);
         let frame = wrap_message(&msg);
-        assert_eq!(frame, hex("0801000011000000a500000009ac0801100118b8172801865a"));
+        assert_eq!(
+            frame,
+            hex("0801000011000000a500000009ac0801100118b8172801865a")
+        );
     }
 
     #[test]

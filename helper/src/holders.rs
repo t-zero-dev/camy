@@ -227,7 +227,10 @@ pub(crate) fn classify(comm: &str, cmdline: &str, extra: &str) -> (String, &'sta
         return ("YoloCam helper".into(), "other");
     }
     let hay = format!("{comm} {cmdline} {extra}").to_ascii_lowercase();
-    if hay.contains("obs-studio") || comm == "obs" || hay.contains("/obs ") || hay.contains("class:obs")
+    if hay.contains("obs-studio")
+        || comm == "obs"
+        || hay.contains("/obs ")
+        || hay.contains("class:obs")
     {
         return ("OBS Studio".into(), "obs");
     }
@@ -242,7 +245,9 @@ pub(crate) fn classify(comm: &str, cmdline: &str, extra: &str) -> (String, &'sta
     if is_meet(&hay) {
         return ("Google Meet".into(), "meet");
     }
-    if hay.contains("ms-teams") || hay.contains("teams.microsoft") || hay.contains("microsoft teams")
+    if hay.contains("ms-teams")
+        || hay.contains("teams.microsoft")
+        || hay.contains("microsoft teams")
     {
         return ("Microsoft Teams".into(), "other");
     }

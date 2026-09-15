@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use yolocam::client::Client;
+use yolocam::cmd::Cmd;
 use yolocam::discover::{self, Discovery, Inventory, Model};
-use yolocam::params::{self, Param};
+use yolocam::params::{self, Param, ParamId, SetPayload};
 use yolocam::pb;
 use yolocam::preview::Preview;
 use yolocam::usbwatch::PlugWatch;
@@ -22,44 +23,14 @@ use yolocam::{Error, Result};
 use super::{connect_watch, ctl_path, emit};
 
 #[derive(Clone, Copy, Debug)]
-enum SetBody {
-    Int(u32),
-    Rect(pb::RectF),
-    Wb { r: u32, b: u32 },
-}
-
-impl SetBody {
-    fn set_wire(self) -> Option<u32> {
-        match self {
-            Self::Int(w) => Some(w),
-            Self::Rect(_) | Self::Wb { .. } => None,
-        }
-    }
-
-    fn set_rect(self) -> Option<pb::RectF> {
-        match self {
-            Self::Rect(r) => Some(r),
-            Self::Int(_) | Self::Wb { .. } => None,
-        }
-    }
-
-    fn set_wb(self) -> Option<(u32, u32)> {
-        match self {
-            Self::Wb { r, b } => Some((r, b)),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
 enum RpcBody {
     Get,
-    Set(SetBody),
+    Set(SetPayload),
 }
 
 impl RpcBody {
     fn timeout_is_error(self) -> bool {
-        matches!(self, Self::Set(SetBody::Int(_) | SetBody::Wb { .. }))
+        matches!(self, Self::Set(SetPayload::Int(_) | SetPayload::Wb { .. }))
     }
 
     fn set_wire(self) -> Option<u32> {
@@ -89,7 +60,7 @@ struct Pending {
 struct QueuedSet {
     name: &'static str,
     cid: u32,
-    body: SetBody,
+    body: SetPayload,
 }
 
 struct Rpc {
@@ -136,31 +107,14 @@ struct Session {
     last_reconnect: Instant,
     last_fill: Instant,
     last_covered: Option<bool>,
-    unsupported: Vec<&'static str>,
+    unsupported: Vec<ParamId>,
 }
 
 impl Session {
     fn new(disc: Discovery) -> Self {
         let client = open_client(&disc);
         let unsupported = match disc.model {
-            Model::S3 => vec![
-                "hue",
-                "gamma",
-                "zoom",
-                "lens-detail",
-                "mic-type",
-                "audio-volume",
-                "audio-denoise",
-                "audio-reverb",
-                "audio-delay",
-                "audio-agc",
-                "hdmi-format",
-                "hdmi-color",
-                "brightness",
-                "distortion",
-                "clut",
-                "clut-mix",
-            ],
+            Model::S3 => params::S3_UNSUPPORTED.to_vec(),
             Model::S7 => Vec::new(),
         };
         Self {
@@ -325,7 +279,9 @@ impl Watch {
         let Some(mut c) = s.client.take() else {
             return;
         };
-        if s.last_beat.elapsed() > Duration::from_secs(25) && c.pace_ready() && s.rpc.queued.is_none()
+        if s.last_beat.elapsed() > Duration::from_secs(25)
+            && c.pace_ready()
+            && s.rpc.queued.is_none()
         {
             match c.queue_heartbeat() {
                 Ok(()) => s.last_beat = Instant::now(),
@@ -414,7 +370,13 @@ impl Watch {
             false
         };
         let s3 = s3_live && fds.get(idx).is_some_and(|f| f.any() == Some(true));
-        Hits { stdin, ctl, plug, s7, s3 }
+        Hits {
+            stdin,
+            ctl,
+            plug,
+            s7,
+            s3,
+        }
     }
 
     fn flush_camera(&mut self, model: Model) {
@@ -448,7 +410,13 @@ impl Watch {
         match c.try_read() {
             Ok(msgs) => {
                 s.client = Some(c);
-                dispatch(&s.disc, &mut s.focus, &mut s.rpc.pending, &mut s.unsupported, msgs);
+                dispatch(
+                    &s.disc,
+                    &mut s.focus,
+                    &mut s.rpc.pending,
+                    &mut s.unsupported,
+                    msgs,
+                );
             }
             Err(e) => disconnect_session(s, &e),
         }
@@ -496,18 +464,27 @@ impl Watch {
             Some(SendKind::Set(q)) => {
                 let started = Instant::now();
                 let send = match q.body {
-                    SetBody::Int(wire) => c.begin_set(q.cid, wire),
-                    SetBody::Rect(rect) => c.begin_set_rect(q.cid, rect),
-                    SetBody::Wb { r, b } => c.begin_set_wb(q.cid, r, b),
+                    SetPayload::Int(wire) => c.begin_set(q.cid, wire),
+                    SetPayload::Rect(rect) => c.begin_set_rect(q.cid, rect),
+                    SetPayload::Wb { r, b } => c.begin_set_wb(q.cid, r, b),
                 };
                 match send {
                     Ok(seq) => {
                         if let Some(r) = q.body.set_rect() {
-                            emit_cam(&s.disc, serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}));
-                            emit_cam(&s.disc, serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
+                            emit_cam(
+                                &s.disc,
+                                serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}),
+                            );
+                            emit_cam(
+                                &s.disc,
+                                serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}),
+                            );
                         }
                         if let Some((wr, wb)) = q.body.set_wb() {
-                            emit_cam(&s.disc, serde_json::json!({"event":"param","name": "wb-offset", "cid": q.cid, "resp": 0, "value": {"r": wr, "b": wb}}));
+                            emit_cam(
+                                &s.disc,
+                                serde_json::json!({"event":"param","name": "wb-offset", "cid": q.cid, "resp": 0, "value": {"r": wr, "b": wb}}),
+                            );
                         }
                         s.rpc.pending = Some(Pending {
                             seq,
@@ -526,7 +503,7 @@ impl Watch {
                 }
             }
             Some(SendKind::Get(_)) if hold_gets && !s.fill.is_urgent() => None,
-            Some(SendKind::Get(p)) if s.unsupported.contains(&p.name) => {
+            Some(SendKind::Get(p)) if s.unsupported.contains(&p.id) => {
                 s.fill.commit();
                 None
             }
@@ -632,16 +609,21 @@ impl Watch {
         if let Some(s) = self.slot(self.selected) {
             emit_cam(&s.disc, discover_json(&s.disc));
             if !s.unsupported.is_empty() {
+                let names: Vec<&'static str> = s.unsupported.iter().map(|id| id.as_str()).collect();
                 emit_cam(
                     &s.disc,
-                    serde_json::json!({"event":"caps","unsupported": s.unsupported}),
+                    serde_json::json!({"event":"caps","unsupported": names}),
                 );
             }
         }
     }
 
     fn target_model(&self, v: &serde_json::Value) -> Model {
-        if let Some(m) = v.get("model").and_then(|x| x.as_str()).and_then(parse_model) {
+        if let Some(m) = v
+            .get("model")
+            .and_then(|x| x.as_str())
+            .and_then(parse_model)
+        {
             return m;
         }
         if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
@@ -659,45 +641,43 @@ impl Watch {
     fn handle_cmd(&mut self, line: &str) -> Result<Option<serde_json::Value>> {
         let v: serde_json::Value =
             serde_json::from_str(line).map_err(|e| Error::Protocol(format!("json: {e}")))?;
-        let cmd = v.get("cmd").and_then(|x| x.as_str()).unwrap_or("");
-        if cmd == "select" {
-            let model = self.target_model(&v);
-            if self.slot(model).is_none() {
-                return Err(Error::Invalid(format!("{model:?} not plugged")));
-            }
-            if self.selected != model {
-                if let Some(s) = self.slot_mut(self.selected) {
-                    if s.preview.is_some() {
-                        s.preview = None;
-                        emit_cam(&s.disc, serde_json::json!({"event":"preview","on": false}));
-                    }
-                }
-                self.selected = model;
-                if let Some(s) = self.slot_mut(model) {
-                    s.rpc.clear();
-                    s.fill.restart();
-                }
-                self.emit_state();
-            }
-            return Ok(None);
-        }
+        let cmd = Cmd::parse(&v)?;
         let model = self.target_model(&v);
         match cmd {
-            "tab" => {
-                let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("exposure");
-                if let Some(s) = self.slot_mut(model) {
-                    s.fill.set_tab(name);
+            Cmd::Select => {
+                if self.slot(model).is_none() {
+                    return Err(Error::Invalid(format!("{model:?} not plugged")));
+                }
+                if self.selected != model {
+                    if let Some(s) = self.slot_mut(self.selected) {
+                        if s.preview.is_some() {
+                            s.preview = None;
+                            emit_cam(&s.disc, serde_json::json!({"event":"preview","on": false}));
+                        }
+                    }
+                    self.selected = model;
+                    if let Some(s) = self.slot_mut(model) {
+                        s.rpc.clear();
+                        s.fill.restart();
+                    }
+                    self.emit_state();
                 }
                 Ok(None)
             }
-            "get-all" => {
+            Cmd::Tab { group } => {
+                if let Some(s) = self.slot_mut(model) {
+                    s.fill.set_tab(group);
+                }
+                Ok(None)
+            }
+            Cmd::GetAll => {
                 if let Some(s) = self.slot_mut(model) {
                     s.rpc.pending = None;
                     s.fill.restart();
                 }
                 Ok(None)
             }
-            "refresh" => {
+            Cmd::Refresh => {
                 if let Some(s) = self.slot_mut(model) {
                     s.rpc.pending = None;
                     s.fill.refresh();
@@ -707,53 +687,22 @@ impl Watch {
                 }
                 Ok(None)
             }
-            "set" => {
-                let name = v
-                    .get("name")
-                    .and_then(|x| x.as_str())
-                    .ok_or_else(|| Error::Invalid("name".into()))?;
-                let raw = v
-                    .get("value")
-                    .map(|x| match x {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    })
-                    .ok_or_else(|| Error::Invalid("value".into()))?;
-                if name == "wb-offset" {
-                    let r = v.get("r").and_then(serde_json::Value::as_u64).unwrap_or(10) as u32;
-                    let b = v.get("b").and_then(serde_json::Value::as_u64).unwrap_or(10) as u32;
-                    let s = self
-                        .slot_mut(model)
-                        .ok_or(Error::Disconnected("disconnected"))?;
-                    if s.client.is_none() {
-                        return Err(Error::Disconnected("disconnected"));
-                    }
-                    s.rpc.queued = Some(QueuedSet {
-                        name: "wb-offset",
-                        cid: 33,
-                        body: SetBody::Wb { r, b },
-                    });
-                    return Ok(None);
-                }
-                let p = params::find(name).ok_or_else(|| Error::Invalid(format!("unknown {name}")))?;
-                if !p.set_ok {
-                    return Err(Error::Invalid(format!("{name} is read-only")));
-                }
+            Cmd::Set { param, payload } => {
                 let s = self
                     .slot_mut(model)
                     .ok_or(Error::Disconnected("disconnected"))?;
                 if s.client.is_none() {
                     return Err(Error::Disconnected("disconnected"));
                 }
-                let wire = params::encode_named(p, raw.trim_matches('"'))?;
+                let p = param.spec();
                 s.rpc.queued = Some(QueuedSet {
                     name: p.name,
                     cid: p.cid,
-                    body: SetBody::Int(wire),
+                    body: payload,
                 });
                 Ok(None)
             }
-            "af-target" | "af-area" => {
+            Cmd::AfTarget | Cmd::AfArea => {
                 let s = self
                     .slot_mut(model)
                     .ok_or(Error::Disconnected("disconnected"))?;
@@ -762,17 +711,17 @@ impl Watch {
                 }
                 let rect = json_norm_rect(&v)?;
                 s.rpc.queued = Some(QueuedSet {
-                    name: if cmd == "af-target" {
+                    name: if matches!(cmd, Cmd::AfTarget) {
                         "focus-target"
                     } else {
                         "focus-area"
                     },
                     cid: params::FOCUS_TARGET_CID,
-                    body: SetBody::Rect(rect),
+                    body: SetPayload::Rect(rect),
                 });
                 Ok(None)
             }
-            "heartbeat" => {
+            Cmd::Heartbeat => {
                 if let Some(s) = self.slot_mut(model) {
                     if let Some(c) = s.client.as_mut() {
                         if c.pace_ready() {
@@ -786,14 +735,16 @@ impl Watch {
                 }
                 Ok(None)
             }
-            "preview" => {
-                let on = v.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            Cmd::Preview { on } => {
                 let s = self
                     .slot_mut(model)
                     .ok_or_else(|| Error::Invalid("no YoloCam UVC device".into()))?;
                 if on {
                     if s.preview.is_some() {
-                        return Ok(Some(tagged(&s.disc, serde_json::json!({"event":"preview","on": true}))));
+                        return Ok(Some(tagged(
+                            &s.disc,
+                            serde_json::json!({"event":"preview","on": true}),
+                        )));
                     }
                     let dev = s
                         .disc
@@ -823,17 +774,19 @@ impl Watch {
                 } else {
                     s.preview = None;
                     s.last_covered = None;
-                    Ok(Some(tagged(&s.disc, serde_json::json!({"event":"preview","on": false}))))
+                    Ok(Some(tagged(
+                        &s.disc,
+                        serde_json::json!({"event":"preview","on": false}),
+                    )))
                 }
             }
-            "reconnect" => {
+            Cmd::Reconnect => {
                 if let Some(s) = self.slot_mut(model) {
                     s.rpc.clear();
                     s.client = open_client(&s.disc);
                 }
                 Ok(None)
             }
-            _ => Err(Error::Invalid(format!("unknown cmd {cmd}"))),
         }
     }
 }
@@ -880,7 +833,12 @@ fn discover_json(disc: &Discovery) -> serde_json::Value {
     })
 }
 
-fn inventory_json(inv: &Inventory, selected: Model, s7_ctrl: bool, s3_ctrl: bool) -> serde_json::Value {
+fn inventory_json(
+    inv: &Inventory,
+    selected: Model,
+    s7_ctrl: bool,
+    s3_ctrl: bool,
+) -> serde_json::Value {
     let mut cameras = Vec::new();
     for d in inv.plugged() {
         let control = match d.model {
@@ -941,7 +899,10 @@ fn sync_slot(slot: &mut Option<Session>, next: Option<Discovery>) {
 fn disconnect_session(s: &mut Session, e: &Error) {
     s.client = None;
     s.rpc.clear();
-    emit_cam(&s.disc, serde_json::json!({"event":"disconnected","error": e.to_string()}));
+    emit_cam(
+        &s.disc,
+        serde_json::json!({"event":"disconnected","error": e.to_string()}),
+    );
 }
 
 fn open_client(disc: &Discovery) -> Option<Client> {
@@ -956,7 +917,10 @@ fn open_client(disc: &Discovery) -> Option<Client> {
             Some(c)
         }
         Err(e) => {
-            emit_cam(disc, serde_json::json!({"event":"disconnected","error": e.to_string()}));
+            emit_cam(
+                disc,
+                serde_json::json!({"event":"disconnected","error": e.to_string()}),
+            );
             None
         }
     }
@@ -966,7 +930,7 @@ fn dispatch(
     disc: &Discovery,
     focus: &mut FocusEmit,
     pending: &mut Option<Pending>,
-    unsupported: &mut Vec<&'static str>,
+    unsupported: &mut Vec<ParamId>,
     msgs: Vec<pb::Message>,
 ) {
     for mut msg in msgs {
@@ -976,14 +940,24 @@ fn dispatch(
                 let cid = p.cid;
                 let body = p.body;
                 *pending = None;
-                if msg.resp_code == 100 && matches!(body, RpcBody::Get) && !unsupported.contains(&name) {
-                    unsupported.push(name);
+                if msg.resp_code == 100 && matches!(body, RpcBody::Get) {
+                    if let Some(id) = ParamId::parse(name) {
+                        if !unsupported.contains(&id) {
+                            unsupported.push(id);
+                        }
+                    }
                 }
                 let value = set_param_value(name, body.set_wire(), &msg);
-                emit_cam(disc, serde_json::json!({"event":"param","name": name, "cid": cid, "resp": msg.resp_code, "value": value}));
+                emit_cam(
+                    disc,
+                    serde_json::json!({"event":"param","name": name, "cid": cid, "resp": msg.resp_code, "value": value}),
+                );
                 if let Some(r) = body.set_rect() {
                     if cid == params::FOCUS_AREA_CID || cid == params::FOCUS_TARGET_CID {
-                        emit_cam(disc, serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}));
+                        emit_cam(
+                            disc,
+                            serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}),
+                        );
                     }
                 }
                 continue;
@@ -1006,10 +980,16 @@ fn dispatch(
         }
         if let Some(p) = params::find_cid(msg.id) {
             if !msg.is_notify() {
-                emit_cam(disc, serde_json::json!({"event":"param","name":p.name,"cid":p.cid,"resp":msg.resp_code,"value": params::body_json(&msg)}));
+                emit_cam(
+                    disc,
+                    serde_json::json!({"event":"param","name":p.name,"cid":p.cid,"resp":msg.resp_code,"value": params::body_json(&msg)}),
+                );
             }
         } else if !msg.is_notify() {
-            emit_cam(disc, serde_json::json!({"event":"raw","cid":msg.id,"type":msg.ty.map(|t| t as u32),"resp":msg.resp_code,"value": params::body_json(&msg)}));
+            emit_cam(
+                disc,
+                serde_json::json!({"event":"raw","cid":msg.id,"type":msg.ty.map(|t| t as u32),"resp":msg.resp_code,"value": params::body_json(&msg)}),
+            );
         }
     }
 }
@@ -1066,14 +1046,18 @@ fn drain_preview(s: &mut Session) {
             } else {
                 p.dir.join("preview-b.jpg")
             };
-            let covered = std::fs::read_to_string(p.dir.join("covered")).is_ok_and(|s| s.trim() == "1");
+            let covered =
+                std::fs::read_to_string(p.dir.join("covered")).is_ok_and(|s| s.trim() == "1");
             emit_cam(
                 &s.disc,
                 serde_json::json!({"event":"frame","slot": slot.trim(), "path": file, "covered": covered}),
             );
             if s.last_covered != Some(covered) {
                 s.last_covered = Some(covered);
-                emit_cam(&s.disc, serde_json::json!({"event":"covered","on": covered}));
+                emit_cam(
+                    &s.disc,
+                    serde_json::json!({"event":"covered","on": covered}),
+                );
             }
         }
     }
@@ -1175,7 +1159,11 @@ impl Fill {
     }
 }
 
-fn set_param_value(name: &'static str, set_wire: Option<u32>, msg: &pb::Message) -> serde_json::Value {
+fn set_param_value(
+    name: &'static str,
+    set_wire: Option<u32>,
+    msg: &pb::Message,
+) -> serde_json::Value {
     if let Some(wire) = set_wire {
         if matches!(msg.body, pb::Body::Empty) {
             return params::find(name).map_or(serde_json::json!(wire), |p| {
@@ -1221,9 +1209,9 @@ fn json_norm_rect(v: &serde_json::Value) -> Result<pb::RectF> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Fill, RpcBody, SetBody};
+    use super::{Fill, RpcBody};
     use std::time::{Duration, Instant};
-    use yolocam::params::{self, Kind};
+    use yolocam::params::{self, Kind, SetPayload};
 
     #[test]
     fn refresh_queues_open_tab_only() {
@@ -1238,7 +1226,7 @@ mod tests {
         assert!(fill
             .order
             .iter()
-            .all(|&i| !matches!(params::PARAMS[i].kind, Kind::Info)));
+            .all(|&i| !matches!(params::PARAMS[i].kind, Kind::GetOnly | Kind::WbOffset)));
         let past = Instant::now()
             .checked_sub(Duration::from_secs(1))
             .expect("clock");
@@ -1284,7 +1272,7 @@ mod tests {
         rpc.queued = Some(super::QueuedSet {
             name: "iso",
             cid: 17,
-            body: SetBody::Int(200),
+            body: SetPayload::Int(200),
         });
         match super::take_send(&mut rpc, &mut fill, past) {
             Some(super::SendKind::Set(q)) => assert_eq!(q.name, "iso"),
@@ -1299,12 +1287,12 @@ mod tests {
         rpc.queued = Some(super::QueuedSet {
             name: "iso",
             cid: 17,
-            body: SetBody::Int(100),
+            body: SetPayload::Int(100),
         });
         rpc.queued = Some(super::QueuedSet {
             name: "ev",
             cid: 15,
-            body: SetBody::Int(8),
+            body: SetPayload::Int(8),
         });
         assert_eq!(rpc.queued.unwrap().name, "ev");
     }
@@ -1316,7 +1304,7 @@ mod tests {
             name: "iso",
             cid: 17,
             started: Instant::now(),
-            body: RpcBody::Set(SetBody::Int(200)),
+            body: RpcBody::Set(SetPayload::Int(200)),
         };
         let ev = super::set_timeout_event(&p).expect("set timeout event");
         assert_eq!(ev["event"], "param");
@@ -1331,7 +1319,7 @@ mod tests {
             name: "focus-area",
             cid: 24,
             started: Instant::now(),
-            body: RpcBody::Set(SetBody::Rect(yolocam::pb::RectF {
+            body: RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF {
                 x: 0.2,
                 y: 0.2,
                 w: 0.3,
@@ -1355,13 +1343,15 @@ mod tests {
 
     #[test]
     fn rpc_body_flags_cannot_diverge() {
-        assert!(RpcBody::Set(SetBody::Int(1)).timeout_is_error());
-        assert!(!RpcBody::Set(SetBody::Rect(yolocam::pb::RectF::default())).timeout_is_error());
+        assert!(RpcBody::Set(SetPayload::Int(1)).timeout_is_error());
+        assert!(!RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF::default())).timeout_is_error());
         assert!(!RpcBody::Get.timeout_is_error());
-        assert_eq!(RpcBody::Set(SetBody::Int(9)).set_wire(), Some(9));
-        assert!(RpcBody::Set(SetBody::Rect(yolocam::pb::RectF::default()))
-            .set_wire()
-            .is_none());
+        assert_eq!(RpcBody::Set(SetPayload::Int(9)).set_wire(), Some(9));
+        assert!(
+            RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF::default()))
+                .set_wire()
+                .is_none()
+        );
         assert!(RpcBody::Get.set_rect().is_none());
     }
 }

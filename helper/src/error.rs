@@ -6,7 +6,9 @@ use std::io;
 #[derive(Debug)]
 pub enum Error {
     Busy,
-    Timeout { cid: Option<u32> },
+    Timeout {
+        cid: Option<u32>,
+    },
     Io {
         message: String,
         source: Option<io::Error>,
@@ -37,7 +39,9 @@ impl Error {
     pub fn is_transient_write(&self) -> bool {
         match self {
             Self::Busy => true,
-            Self::Io { source: Some(e), .. } => matches!(
+            Self::Io {
+                source: Some(e), ..
+            } => matches!(
                 e.kind(),
                 io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
             ),
@@ -109,10 +113,7 @@ mod tests {
 
     #[test]
     fn would_block_is_transient_write() {
-        let e = Error::io_ctx(
-            io::Error::from(io::ErrorKind::WouldBlock),
-            "write",
-        );
+        let e = Error::io_ctx(io::Error::from(io::ErrorKind::WouldBlock), "write");
         assert!(e.is_transient_write());
         assert!(!Error::Disconnected("camera closed the socket").is_transient_write());
     }

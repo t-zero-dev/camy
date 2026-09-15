@@ -60,7 +60,10 @@ pub enum Body {
     WbOffset(WbOffset),
     Lens(LensDetail),
     Rects(Vec<RectF>),
-    Bytes { field: u32, data: Vec<u8> },
+    Bytes {
+        field: u32,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, Default)]

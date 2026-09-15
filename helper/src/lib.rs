@@ -1,4 +1,4 @@
-//! YoloCam S7 control helper for the Omarchy plugin.
+//! YoloCam S7/S3 control helper for the Omarchy plugin.
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 // FFI, protobuf varints, and V4L2 lengths are truncated by construction.
@@ -15,6 +15,7 @@
 )]
 
 pub mod client;
+pub mod cmd;
 pub mod discover;
 pub mod error;
 pub mod holders;

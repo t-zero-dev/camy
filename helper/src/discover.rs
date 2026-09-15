@@ -6,7 +6,6 @@ use serde::Serialize;
 pub const USB_VID: &str = "46f8";
 pub const USB_PID_S7: &str = "0851";
 pub const USB_PID_S3: &str = "0855";
-/// Kept for callers that still name the S7 PID.
 pub const USB_PID: &str = USB_PID_S7;
 pub const DEFAULT_IP_S7: &str = "192.168.129.10";
 pub const DEFAULT_IP_S3: &str = "192.168.126.10";
@@ -102,7 +101,10 @@ pub struct Inventory {
 
 impl Inventory {
     pub fn glyph_code(&self) -> u8 {
-        glyph_code(self.s3.as_ref().is_some_and(|d| d.usb), self.s7.as_ref().is_some_and(|d| d.usb))
+        glyph_code(
+            self.s3.as_ref().is_some_and(|d| d.usb),
+            self.s7.as_ref().is_some_and(|d| d.usb),
+        )
     }
 
     pub fn plugged(&self) -> Vec<&Discovery> {
@@ -116,7 +118,7 @@ impl Inventory {
         out
     }
 
-    /// S7 if present, else S3, else an unplugged S7 (today's `discover()` shape).
+    /// S7 if plugged, else S3, else an unplugged S7.
     pub fn primary(&self) -> Discovery {
         if let Some(d) = self.s7.as_ref().filter(|d| d.usb) {
             return d.clone();
@@ -135,14 +137,17 @@ impl Inventory {
     }
 
     pub fn same_plug(&self, other: &Self) -> bool {
-        slot_same(self.s7.as_ref(), other.s7.as_ref()) && slot_same(self.s3.as_ref(), other.s3.as_ref())
+        slot_same(self.s7.as_ref(), other.s7.as_ref())
+            && slot_same(self.s3.as_ref(), other.s3.as_ref())
     }
 }
 
 fn slot_same(a: Option<&Discovery>, b: Option<&Discovery>) -> bool {
     match (a, b) {
         (None, None) => true,
-        (Some(x), Some(y)) => x.usb == y.usb && x.serial == y.serial && x.iface == y.iface && x.video == y.video,
+        (Some(x), Some(y)) => {
+            x.usb == y.usb && x.serial == y.serial && x.iface == y.iface && x.video == y.video
+        }
         _ => false,
     }
 }
@@ -156,7 +161,10 @@ pub fn discover() -> Discovery {
 }
 
 pub fn discover_all() -> Inventory {
-    discover_from(Path::new("/sys/bus/usb/devices"), Path::new("/sys/class/video4linux"))
+    discover_from(
+        Path::new("/sys/bus/usb/devices"),
+        Path::new("/sys/class/video4linux"),
+    )
 }
 
 pub fn discover_from(usb_root: &Path, v4l_root: &Path) -> Inventory {
@@ -366,7 +374,13 @@ pub fn sibling_ten(host: &str) -> Option<String> {
 pub fn sanitize_id(serial: &str) -> String {
     let s: String = serial
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     if s.is_empty() {
         "camera".into()
@@ -404,8 +418,14 @@ mod tests {
 
     #[test]
     fn sibling_ten_rewrites_last_octet() {
-        assert_eq!(sibling_ten("192.168.129.11").as_deref(), Some("192.168.129.10"));
-        assert_eq!(sibling_ten("192.168.126.11").as_deref(), Some("192.168.126.10"));
+        assert_eq!(
+            sibling_ten("192.168.129.11").as_deref(),
+            Some("192.168.129.10")
+        );
+        assert_eq!(
+            sibling_ten("192.168.126.11").as_deref(),
+            Some("192.168.126.10")
+        );
         assert_eq!(sibling_ten("bad"), None);
     }
 
@@ -469,8 +489,14 @@ mod tests {
         symlink(usb.join("s7"), v4l.join("video34/device")).unwrap();
 
         let inv = discover_from(&usb, &v4l);
-        assert_eq!(inv.s7.as_ref().and_then(|d| d.video.as_deref()), Some("/dev/video34"));
-        assert_eq!(inv.s3.as_ref().and_then(|d| d.video.as_deref()), Some("/dev/video10"));
+        assert_eq!(
+            inv.s7.as_ref().and_then(|d| d.video.as_deref()),
+            Some("/dev/video34")
+        );
+        assert_eq!(
+            inv.s3.as_ref().and_then(|d| d.video.as_deref()),
+            Some("/dev/video10")
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

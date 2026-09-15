@@ -146,7 +146,13 @@ impl Preview {
         Self::start_in(device, width, height, fps, None)
     }
 
-    pub fn start_in(device: &str, width: u32, height: u32, fps: u32, serial: Option<&str>) -> Result<Self> {
+    pub fn start_in(
+        device: &str,
+        width: u32,
+        height: u32,
+        fps: u32,
+        serial: Option<&str>,
+    ) -> Result<Self> {
         let dir = match serial {
             Some(id) => ensure_camera_dir(id)?,
             None => ensure_runtime_dir()?,
@@ -206,7 +212,10 @@ pub fn runtime_dir() -> PathBuf {
     let xdg = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     let tmp = std::env::var_os("TMPDIR").map(PathBuf::from);
     let chosen = choose_runtime_dir(xdg.as_deref(), tmp.as_deref(), current_uid());
-    if !xdg.as_ref().is_some_and(|p| p.is_absolute() && chosen.starts_with(p)) {
+    if !xdg
+        .as_ref()
+        .is_some_and(|p| p.is_absolute() && chosen.starts_with(p))
+    {
         warn_runtime_fallback();
     }
     chosen
@@ -251,7 +260,8 @@ fn wipe_preview_files(dir: &Path) {
 }
 
 pub fn restrict_mode(path: &Path, mode: u32) -> Result<()> {
-    let meta = fs::metadata(path).map_err(|e| Error::io_ctx(e, format!("stat {}", path.display())))?;
+    let meta =
+        fs::metadata(path).map_err(|e| Error::io_ctx(e, format!("stat {}", path.display())))?;
     if meta.uid() != current_uid() {
         return Ok(());
     }
@@ -301,13 +311,7 @@ impl Drop for Map {
 }
 
 #[allow(clippy::too_many_lines)]
-fn run(
-    fd: i32,
-    width: u32,
-    height: u32,
-    dir: &Path,
-    stop: &AtomicBool,
-) -> Result<()> {
+fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Result<()> {
     // SAFETY: `fd` is the capture `File` held by `Preview` until Drop.
     let file = unsafe { BorrowedFd::borrow_raw(fd) };
     // SAFETY: `fd` is that same capture fd.
@@ -381,7 +385,9 @@ fn run(
 
     let mut slot = 0u8;
     let min_interval = Duration::from_millis(66); // ~15 fps display
-    let mut last = Instant::now().checked_sub(min_interval).unwrap_or_else(Instant::now);
+    let mut last = Instant::now()
+        .checked_sub(min_interval)
+        .unwrap_or_else(Instant::now);
     let mut dark_streak: u8 = 0;
     let mut last_covered = false;
     let mut got_frame = false;
@@ -417,7 +423,8 @@ fn run(
         if idx < maps.len() && used > 2 && last.elapsed() >= min_interval {
             let used = used.min(maps[idx].len);
             // SAFETY: DQBUF filled `bytesused` bytes of this mapping.
-            let raw = unsafe { std::slice::from_raw_parts(maps[idx].ptr.as_ptr().cast::<u8>(), used) };
+            let raw =
+                unsafe { std::slice::from_raw_parts(maps[idx].ptr.as_ptr().cast::<u8>(), used) };
             let jpeg = trim_jpeg(raw);
             let name = if slot == 0 {
                 "preview-a.jpg"
@@ -438,10 +445,8 @@ fn run(
                     let covered = dark_streak >= COVER_STREAK;
                     if covered != last_covered {
                         last_covered = covered;
-                        let _ = std::fs::write(
-                            dir.join("covered"),
-                            if covered { b"1" } else { b"0" },
-                        );
+                        let _ =
+                            std::fs::write(dir.join("covered"), if covered { b"1" } else { b"0" });
                     }
                     let _ = std::fs::write(dir.join("slot"), if slot == 0 { b"a" } else { b"b" });
                     slot ^= 1;
@@ -564,7 +569,10 @@ mod tests {
     fn camera_dir_nests_under_runtime() {
         let p = choose_runtime_dir(Some(Path::new("/run/user/1000")), None, 1000);
         assert_eq!(p, PathBuf::from("/run/user/1000/yolocam"));
-        assert_eq!(p.join("Y-CAM-25360005"), PathBuf::from("/run/user/1000/yolocam/Y-CAM-25360005"));
+        assert_eq!(
+            p.join("Y-CAM-25360005"),
+            PathBuf::from("/run/user/1000/yolocam/Y-CAM-25360005")
+        );
     }
 
     #[test]

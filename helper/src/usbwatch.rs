@@ -40,13 +40,11 @@ impl PlugWatch {
     }
 }
 
+/// `video*`, `en*`/`eth*`, or a hyphen (USB sysfs ids such as `1-2.4`).
 fn is_interesting(name: Option<&OsString>) -> bool {
     let Some(name) = name else {
         return true;
     };
     let n = name.to_string_lossy();
-    n.starts_with("video")
-        || n.starts_with("en")
-        || n.starts_with("eth")
-        || n.contains('-') // USB sysfs ids like `1-2.4`
+    n.starts_with("video") || n.starts_with("en") || n.starts_with("eth") || n.contains('-')
 }
