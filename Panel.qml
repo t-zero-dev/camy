@@ -213,108 +213,105 @@ Item {
         anchors.margins: Style.space(16)
         spacing: Style.space(12)
 
-          Item {
+          Column {
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.max(heroIcon.height, heroLabels.implicitHeight)
-            width: parent.width
-            implicitHeight: Math.max(heroIcon.height, heroLabels.implicitHeight)
+            spacing: Style.space(4)
 
             CamMark {
               id: heroIcon
               pixelSize: Style.font.display
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
+              anchors.horizontalCenter: parent.horizontalCenter
               width: implicitWidth
               height: implicitHeight
             }
 
-            Column {
-              id: heroLabels
-              anchors.left: heroIcon.right
-              anchors.leftMargin: Style.space(14)
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(3)
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              textFormat: Text.PlainText
+              text: root.heroTitle
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              font.weight: Font.DemiBold
+            }
+
+            Row {
+              anchors.horizontalCenter: parent.horizontalCenter
+              visible: root.showPicker
+              spacing: Style.space(6)
+              PickerChip { modelId: "s7"; label: "S7" }
+              PickerChip { modelId: "s3"; label: "S3" }
+            }
+
+            Item {
+              width: parent.width
+              height: heroLine1Metrics.height
 
               Text {
-                text: root.heroTitle
-                color: root.foreground
+                id: heroLine1Metrics
+                visible: false
+                text: "X"
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.title
-                font.bold: true
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              Text {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                visible: root.heroReadouts.length === 0
+                textFormat: Text.PlainText
+                text: heroStatus().toUpperCase()
+                horizontalAlignment: Text.AlignHCenter
+                color: root.heroAlarm ? Color.urgent : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
               }
 
               Row {
-                visible: root.showPicker
+                id: heroStats
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: root.heroReadouts.length > 0
                 spacing: Style.space(6)
-                PickerChip { modelId: "s7"; label: "S7" }
-                PickerChip { modelId: "s3"; label: "S3" }
-              }
-
-              Item {
-                width: parent.width
-                height: heroLine1Metrics.height
-
-                Text {
-                  id: heroLine1Metrics
-                  visible: false
-                  text: "X"
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-
-                Text {
-                  anchors.fill: parent
-                  visible: root.heroReadouts.length === 0
-                  text: heroStatus().toUpperCase()
-                  color: root.heroAlarm ? Color.urgent : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
-                  verticalAlignment: Text.AlignVCenter
-                }
-
-                Row {
-                  id: heroStats
-                  anchors.fill: parent
-                  visible: root.heroReadouts.length > 0
-                  spacing: Style.space(6)
-                  clip: false
-                  Repeater {
-                    model: root.heroReadouts
-                    Text {
-                      required property int index
-                      required property var modelData
-                      text: (index > 0 ? "·  " : "") + String(modelData.label || "").toUpperCase()
-                      color: root.dim
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.bodySmall
-                      verticalAlignment: Text.AlignVCenter
-                      HoverHandler {
-                        onHoveredChanged: {
-                          if (hovered)
-                            root.heroHoverTip = String(modelData.tip || "")
-                          else if (root.heroHoverTip === String(modelData.tip || ""))
-                            root.heroHoverTip = ""
-                        }
+                clip: false
+                Repeater {
+                  model: root.heroReadouts
+                  Text {
+                    required property int index
+                    required property var modelData
+                    textFormat: Text.PlainText
+                    text: (index > 0 ? "·  " : "") + String(modelData.label || "").toUpperCase()
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    verticalAlignment: Text.AlignVCenter
+                    HoverHandler {
+                      onHoveredChanged: {
+                        if (hovered)
+                          root.heroHoverTip = String(modelData.tip || "")
+                        else if (root.heroHoverTip === String(modelData.tip || ""))
+                          root.heroHoverTip = ""
                       }
                     }
                   }
                 }
               }
+            }
 
-              Text {
-                width: parent.width
-                text: root.heroReadouts.length > 0 && root.heroHoverTip !== "" ? root.heroHoverTip : " "
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                wrapMode: Text.NoWrap
-                opacity: root.heroReadouts.length > 0 && root.heroHoverTip !== "" ? 1 : 0
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-              }
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.heroReadouts.length > 0 && root.heroHoverTip !== "" ? root.heroHoverTip : " "
+              horizontalAlignment: Text.AlignHCenter
+              elide: Text.ElideRight
+              maximumLineCount: 1
+              wrapMode: Text.NoWrap
+              opacity: root.heroReadouts.length > 0 && root.heroHoverTip !== "" ? 1 : 0
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
             }
           }
 
@@ -323,13 +320,11 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: {
               var w = Math.max(1, window.width - Style.space(32))
-              var maxH = Math.max(220, window.height - 360)
-              var native = root.portraitPreview
-                ? Math.min(w * 0.78, 480)
-                : w * 9 / 16
-              return Math.round(Math.min(native, maxH))
+              if (root.portraitPreview)
+                return Math.round(Math.min(w * 0.78, 480))
+              return Math.round(w * 9 / 16)
             }
-            Layout.minimumHeight: 180
+            Layout.minimumHeight: 160
             width: parent.width
             radius: Style.cornerRadius
             color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06)
@@ -342,12 +337,8 @@ Item {
               id: viewBox
               anchors.horizontalCenter: parent.horizontalCenter
               anchors.verticalCenter: parent.verticalCenter
-              width: {
-                if (root.portraitPreview) return Math.round(parent.height * 9 / 16)
-                if (parent.width * 9 / 16 <= parent.height) return parent.width
-                return Math.round(parent.height * 16 / 9)
-              }
-              height: root.portraitPreview ? parent.height : Math.round(width * 9 / 16)
+              width: root.portraitPreview ? Math.round(parent.height * 9 / 16) : parent.width
+              height: parent.height
               clip: true
 
             Image {
@@ -553,19 +544,21 @@ Item {
             font.pixelSize: Style.font.caption
           }
 
-          ButtonGroup {
+          Item {
             Layout.fillWidth: true
-            Layout.maximumWidth: parent.width
-            width: parent.width
-            clip: true
-            options: root.tabList
-            value: root.tab
-            foreground: root.foreground
-            background: Color.popups.background
-            accent: Color.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            onChanged: function(v) { root.tab = v }
+            Layout.preferredHeight: tabGroup.implicitHeight
+            ButtonGroup {
+              id: tabGroup
+              anchors.horizontalCenter: parent.horizontalCenter
+              options: root.tabList
+              value: root.tab
+              foreground: root.foreground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              onChanged: function(v) { root.tab = v }
+            }
           }
 
           ScrollView {
@@ -574,13 +567,13 @@ Item {
             Layout.fillHeight: true
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ScrollBar.vertical.policy: ScrollBar.AlwaysOn
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
             Column {
               id: panelColumn
               width: Math.max(0, scrollArea.availableWidth - Style.space(22))
-              spacing: Style.space(10)
-              topPadding: Style.space(16)
+              spacing: Style.spacing.panelGap
+              topPadding: Style.space(8)
 
               Loader {
                 width: parent.width
@@ -671,9 +664,7 @@ Item {
   }
 
   readonly property bool heroAlarm: {
-    if (service.lensCovered) return true
     var s = heroStatus()
-    if (s === "Lens looks covered") return true
     if (service.applyStatus !== "") return service.applyStatus.indexOf("did not confirm") >= 0
     return service.lastError !== "" && s === service.lastError
   }
@@ -718,7 +709,6 @@ Item {
 
   function heroStatus() {
     if (service.applyStatus !== "") return service.applyStatus
-    if (service.lensCovered) return "Lens looks covered"
     if (!present) return service.lastError !== "" ? service.lastError : "Unplugged"
     if (service.previewBusy) return "In use by " + (service.previewHolder || "another app")
     if (!service.control) return service.lastError !== "" ? service.lastError : "USB only — no control"
@@ -748,7 +738,6 @@ Item {
     var _vals = service.values
     var _pend = service.pending
     if (service.applyStatus !== "") return []
-    if (service.lensCovered) return []
     if (!present) return []
     if (service.previewBusy) return []
     if (!service.control) return []
@@ -799,6 +788,173 @@ Item {
     }
   }
 
+  component CardGrid: GridLayout {
+    id: grid
+    columns: 2
+    uniformCellWidths: true
+    columnSpacing: Style.spacing.panelGap
+    rowSpacing: Style.spacing.panelGap
+    width: parent ? parent.width : 0
+    Layout.fillWidth: true
+
+    function reflow() {
+      var vis = []
+      var hid = []
+      for (var i = 0; i < children.length; i++) {
+        var c = children[i]
+        if (!c) continue
+        if (c.visible) vis.push(c)
+        else hid.push(c)
+      }
+      var row = 0
+      var col = 0
+      for (var j = 0; j < vis.length; j++) {
+        var item = vis[j]
+        var force = Number(item.cardSpan || 0)
+        var leftover = (col === 0 && (vis.length - j) === 1)
+        var span = (force >= 2 || leftover) ? 2 : 1
+        if (span === 2 && col === 1) {
+          row += 1
+          col = 0
+        }
+        item.Layout.row = row
+        item.Layout.column = col
+        item.Layout.columnSpan = span
+        item.Layout.fillWidth = true
+        item.Layout.fillHeight = true
+        item.Layout.preferredWidth = span
+        item.Layout.minimumWidth = 0
+        item.Layout.minimumHeight = 0
+        item.Layout.maximumWidth = 100000
+        item.Layout.maximumHeight = 100000
+        item.Layout.preferredHeight = item.implicitHeight
+        if (span === 2 || col === 1) {
+          row += 1
+          col = 0
+        } else {
+          col = 1
+        }
+      }
+      for (var h = 0; h < hid.length; h++) {
+        hid[h].Layout.row = 99
+        hid[h].Layout.column = 0
+        hid[h].Layout.columnSpan = 1
+        hid[h].Layout.preferredHeight = 0
+        hid[h].Layout.maximumHeight = 0
+        hid[h].Layout.minimumHeight = 0
+        hid[h].Layout.preferredWidth = 0
+        hid[h].Layout.maximumWidth = 0
+      }
+    }
+
+    function scheduleReflow() {
+      Qt.callLater(function() { grid.reflow() })
+    }
+
+    onChildrenChanged: scheduleReflow()
+    Component.onCompleted: scheduleReflow()
+  }
+
+  component SettingCard: Rectangle {
+    id: card
+    default property alias extra: extraColumn.data
+    property alias header: headerSlot.data
+    property string title: ""
+    property string valueText: ""
+    property string hint: ""
+    property bool hintAlarm: false
+    property string hoverTip: ""
+    property bool showHoverSlot: false
+    property int cardSpan: 0
+
+    Layout.fillWidth: true
+    Layout.fillHeight: true
+    Layout.preferredWidth: 1
+    Layout.minimumWidth: 0
+    implicitWidth: 160
+    onVisibleChanged: if (parent && typeof parent.scheduleReflow === "function") parent.scheduleReflow()
+    Component.onCompleted: if (parent && typeof parent.scheduleReflow === "function") parent.scheduleReflow()
+
+    Binding {
+      when: card.parent && card.parent.columns === undefined
+      target: card
+      property: "width"
+      value: card.parent ? card.parent.width : card.implicitWidth
+    }
+    radius: Style.cornerRadius
+    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+    border.width: Style.normalBorderWidth
+    border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+    implicitHeight: inner.implicitHeight + Style.space(15) * 2
+
+    Column {
+      id: inner
+      x: Style.space(15)
+      y: Style.space(15)
+      width: Math.max(0, card.width - Style.space(15) * 2)
+      spacing: Style.space(6)
+
+      Item {
+        id: titleRow
+        width: parent.width
+        visible: card.title !== "" || headerSlot.width > 0
+        height: Math.max(titleLab.implicitHeight, headerSlot.height)
+        implicitHeight: height
+
+        Text {
+          id: titleLab
+          anchors.left: parent.left
+          anchors.right: headerSlot.left
+          anchors.rightMargin: headerSlot.width > 0 ? Style.space(8) : 0
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: card.title
+          horizontalAlignment: headerSlot.width > 0 ? Text.AlignLeft : Text.AlignHCenter
+          elide: Text.ElideRight
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          font.weight: Font.DemiBold
+        }
+        Item {
+          id: headerSlot
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          width: childrenRect.width
+          height: childrenRect.height
+        }
+      }
+      Text {
+        width: parent.width
+        visible: card.valueText !== ""
+        textFormat: Text.PlainText
+        text: card.valueText
+        horizontalAlignment: Text.AlignHCenter
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Column {
+        id: extraColumn
+        width: parent.width
+        spacing: Style.space(6)
+      }
+      Text {
+        width: parent.width
+        visible: card.showHoverSlot || card.hint !== ""
+        textFormat: Text.PlainText
+        text: card.hoverTip !== "" ? card.hoverTip : (card.hint !== "" ? card.hint : " ")
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.Wrap
+        opacity: (card.hoverTip !== "" || card.hint !== "") ? 1 : 0
+        color: card.hintAlarm ? Color.urgent : (card.hoverTip !== "" ? root.foreground : root.dim)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      }
+    }
+  }
+
   component PickerChip: Rectangle {
     property string modelId
     property string label
@@ -827,62 +983,45 @@ Item {
     }
   }
 
-  component EnumRow: Column {
-    property string title
+  component EnumRow: SettingCard {
+    id: erow
     property string name
     property var options: []
     property var fallback: options.length ? options[0].value : ""
     visible: service.paramOk(name)
-    width: parent ? parent.width : 0
-    spacing: Style.space(4)
-    Text {
-      text: title
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-      font.bold: true
-    }
-    ButtonGroup {
+
+    Item {
       width: parent.width
-      options: parent.options
-      value: String(root.val(name, fallback))
-      foreground: root.foreground
-      background: Color.popups.background
-      fontFamily: root.fontFamily
-      fontSize: Style.font.caption
-      onChanged: function(v) { root.service.setParam(name, v) }
+      height: egroup.implicitHeight
+      ButtonGroup {
+        id: egroup
+        anchors.horizontalCenter: parent.horizontalCenter
+        options: erow.options
+        value: String(root.val(erow.name, erow.fallback))
+        foreground: root.foreground
+        background: Color.popups.background
+        fontFamily: root.fontFamily
+        fontSize: Style.font.caption
+        onChanged: function(v) { root.service.setParam(erow.name, v) }
+      }
     }
   }
 
-  component WbOffsetRow: Column {
+  component WbOffsetRow: SettingCard {
     id: wbOff
-    property string title
     property string channel
     readonly property int cur: {
       var o = root.val("wb-offset", { r: 10, b: 10 })
       return Number(channel === "r" ? (o && o.r) : (o && o.b)) || 10
     }
-    width: parent ? parent.width : 0
-    spacing: Style.space(4)
-    Item {
-      width: parent.width
-      height: ol.implicitHeight
-      Text {
-        id: ol
-        text: title
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: true
-      }
-      Text {
-        anchors.right: parent.right
-        text: String(wbOff.cur)
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
+    header: Text {
+      textFormat: Text.PlainText
+      text: String(wbOff.cur)
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
     }
+
     Item {
       width: parent.width
       height: wbSl.height
@@ -894,7 +1033,7 @@ Item {
         maximum: 20
         step: 1
         integer: true
-        value: parent.parent.cur
+        value: wbOff.cur
         onReleased: function(v) {
           var o = root.val("wb-offset", { r: 10, b: 10 })
           var r = Number(o && o.r) || 10
@@ -912,9 +1051,8 @@ Item {
     }
   }
 
-  component SliderRow: Column {
+  component SliderRow: SettingCard {
     id: srow
-    property string title
     property string name
     property real minimum: 0
     property real maximum: 100
@@ -930,220 +1068,189 @@ Item {
       return isNaN(n) ? null : n
     }
     visible: service.paramOk(name)
-    width: parent ? parent.width : 0
-    spacing: Style.space(4)
 
-    Text {
-      text: title
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-      font.bold: true
-    }
+    header: Rectangle {
+      id: stepper
+      width: Style.space(78)
+      height: Style.space(28)
+      radius: Style.cornerRadius
+      color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+      border.width: 1
+      border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
 
-    Row {
-      width: parent.width
-      spacing: Style.space(8)
-      height: Math.max(sl.height, stepper.height)
-
-      Item {
-        width: parent.width - stepper.width - parent.spacing
-        height: sl.height
-        PanelSlider {
-          id: sl
-          width: parent.width
-          bar: root.bar
-          minimum: srow.minimum
-          maximum: srow.maximum
-          step: srow.step
-          integer: srow.integer
-          value: Number(root.val(name, srow.minimum))
-          onMoved: function(v) {
-            if (!box.activeFocus) box.text = srow.formatLive(v)
+      TextInput {
+        id: box
+        anchors.left: parent.left
+        anchors.right: arrows.left
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.leftMargin: Style.space(6)
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        horizontalAlignment: TextInput.AlignHCenter
+        selectByMouse: true
+        clip: true
+        text: srow.formatLive(Number(root.val(srow.name, srow.minimum)))
+        onEditingFinished: {
+          var n = srow.parseLive(text)
+          if (n === null || n === undefined || isNaN(n)) {
+            text = srow.formatLive(Number(root.val(srow.name, srow.minimum)))
+            return
           }
-          onReleased: function(v) { root.setNum(name, v) }
-        }
-        MouseArea {
-          anchors.fill: sl
-          acceptedButtons: Qt.NoButton
-          onWheel: function(wheel) { wheel.accepted = true }
-        }
-        Rectangle {
-          visible: sl.dragging
-          z: 20
-          width: tipLab.implicitWidth + Style.space(10)
-          height: tipLab.implicitHeight + Style.space(6)
-          radius: Style.cornerRadius
-          color: Color.tooltip.background
-          border.color: Color.tooltip.border
-          border.width: 1
-          x: Math.max(0, Math.min(parent.width - width, sl.width * sl.progress - width / 2))
-          y: {
-            var gy = sl.mapToItem(scrollArea, 0, 0).y
-            if (gy < height + Style.space(8)) return sl.height + Style.space(4)
-            return -height - Style.space(4)
-          }
-          Text {
-            id: tipLab
-            anchors.centerIn: parent
-            text: srow.formatLive(sl.liveValue)
-            color: Color.tooltip.text
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
+          n = Math.max(srow.minimum, Math.min(srow.maximum, n))
+          if (srow.integer) n = Math.round(n)
+          root.setNum(srow.name, n)
+          text = srow.formatLive(n)
         }
       }
 
-      Rectangle {
-        id: stepper
-        width: Style.space(78)
-        height: Style.space(28)
-        radius: Style.cornerRadius
-        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-        border.width: 1
-        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+      Column {
+        id: arrows
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.rightMargin: Style.space(4)
+        spacing: 0
+        Text {
+          textFormat: Text.PlainText
+          text: "▴"
+          color: root.dim
+          font.pixelSize: Style.font.caption
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              var n = Number(root.val(srow.name, srow.minimum)) + srow.step
+              n = Math.min(srow.maximum, srow.integer ? Math.round(n) : n)
+              root.setNum(srow.name, n)
+              box.text = srow.formatLive(n)
+            }
+          }
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: "▾"
+          color: root.dim
+          font.pixelSize: Style.font.caption
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              var n = Number(root.val(srow.name, srow.minimum)) - srow.step
+              n = Math.max(srow.minimum, srow.integer ? Math.round(n) : n)
+              root.setNum(srow.name, n)
+              box.text = srow.formatLive(n)
+            }
+          }
+        }
+      }
+    }
 
-        TextInput {
-          id: box
-          anchors.left: parent.left
-          anchors.right: arrows.left
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.leftMargin: Style.space(6)
-          color: root.foreground
+    Item {
+      width: parent.width
+      height: sl.height
+      PanelSlider {
+        id: sl
+        width: parent.width
+        bar: root.bar
+        minimum: srow.minimum
+        maximum: srow.maximum
+        step: srow.step
+        integer: srow.integer
+        value: Number(root.val(srow.name, srow.minimum))
+        onMoved: function(v) {
+          if (!box.activeFocus) box.text = srow.formatLive(v)
+        }
+        onReleased: function(v) { root.setNum(srow.name, v) }
+      }
+      MouseArea {
+        anchors.fill: sl
+        acceptedButtons: Qt.NoButton
+        onWheel: function(wheel) { wheel.accepted = true }
+      }
+      Rectangle {
+        visible: sl.dragging
+        z: 20
+        width: tipLab.implicitWidth + Style.space(10)
+        height: tipLab.implicitHeight + Style.space(6)
+        radius: Style.cornerRadius
+        color: Color.tooltip.background
+        border.color: Color.tooltip.border
+        border.width: 1
+        x: Math.max(0, Math.min(parent.width - width, sl.width * sl.progress - width / 2))
+        y: {
+          var gy = sl.mapToItem(scrollArea, 0, 0).y
+          if (gy < height + Style.space(8)) return sl.height + Style.space(4)
+          return -height - Style.space(4)
+        }
+        Text {
+          id: tipLab
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: srow.formatLive(sl.liveValue)
+          color: Color.tooltip.text
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
-          selectByMouse: true
-          clip: true
-          text: srow.formatLive(Number(root.val(name, srow.minimum)))
-          onEditingFinished: {
-            var n = srow.parseLive(text)
-            if (n === null || n === undefined || isNaN(n)) {
-              text = srow.formatLive(Number(root.val(name, srow.minimum)))
-              return
-            }
-            n = Math.max(srow.minimum, Math.min(srow.maximum, n))
-            if (srow.integer) n = Math.round(n)
-            root.setNum(name, n)
-            text = srow.formatLive(n)
-          }
-        }
-
-        Column {
-          id: arrows
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.rightMargin: Style.space(4)
-          spacing: 0
-          Text {
-            text: "▴"
-            color: root.dim
-            font.pixelSize: Style.font.caption
-            MouseArea {
-              anchors.fill: parent
-              cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                var n = Number(root.val(name, srow.minimum)) + srow.step
-                n = Math.min(srow.maximum, srow.integer ? Math.round(n) : n)
-                root.setNum(name, n)
-                box.text = srow.formatLive(n)
-              }
-            }
-          }
-          Text {
-            text: "▾"
-            color: root.dim
-            font.pixelSize: Style.font.caption
-            MouseArea {
-              anchors.fill: parent
-              cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                var n = Number(root.val(name, srow.minimum)) - srow.step
-                n = Math.max(srow.minimum, srow.integer ? Math.round(n) : n)
-                root.setNum(name, n)
-                box.text = srow.formatLive(n)
-              }
-            }
-          }
         }
       }
-    }
-
-    Connections {
-      target: service
-      function onValuesChanged() {
-        if (sl.dragging || box.activeFocus) return
-        box.text = srow.formatLive(Number(root.val(name, srow.minimum)))
+      Connections {
+        target: service
+        function onValuesChanged() {
+          if (sl.dragging || box.activeFocus) return
+          box.text = srow.formatLive(Number(root.val(srow.name, srow.minimum)))
+        }
       }
     }
   }
 
   Component {
     id: videoTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
-      Column {
-        width: parent.width
-        spacing: Style.space(4)
-        Text {
-          text: "Orientation"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-        }
-        ButtonGroup {
+    CardGrid {
+      SettingCard {
+        title: "Orientation"
+        Item {
           width: parent.width
-          options: [{ value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }]
-          value: root.previewOrientation
-          foreground: root.foreground
-          background: Color.popups.background
-          fontFamily: root.fontFamily
-          fontSize: Style.font.caption
-          onChanged: function(v) { root.previewOrientation = v }
+          height: orientGroup.implicitHeight
+          ButtonGroup {
+            id: orientGroup
+            anchors.horizontalCenter: parent.horizontalCenter
+            options: [{ value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }]
+            value: root.previewOrientation
+            foreground: root.foreground
+            background: Color.popups.background
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            onChanged: function(v) { root.previewOrientation = v }
+          }
         }
       }
       EnumRow { title: "Frame rate"; name: "frame-rate"; options: [{value:"25",label:"25"},{value:"30",label:"30"},{value:"50",label:"50"},{value:"60",label:"60"}] }
-      EnumRow { title: "HDMI format"; name: "hdmi-format"; options: [{value:"0",label:"Auto"},{value:"1",label:"4K"},{value:"2",label:"1080p"},{value:"3",label:"720p"}] }
-      EnumRow { title: "HDMI color"; name: "hdmi-color"; options: [{value:"0",label:"Auto"},{value:"1",label:"RGB"},{value:"2",label:"YUV422"}] }
-      Column {
-        width: parent.width
-        spacing: Style.space(4)
+      SettingCard {
         visible: String(service.selectedModel) === "s7"
-        Text {
-          text: "Vertical flip"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-        }
-        ButtonGroup {
+        title: "Vertical flip"
+        Item {
           width: parent.width
-          options: [{ value: "0", label: "Off" }, { value: "1", label: "On" }]
-          value: root.previewFlipV ? "1" : "0"
-          foreground: root.foreground
-          background: Color.popups.background
-          fontFamily: root.fontFamily
-          fontSize: Style.font.caption
-          onChanged: function(v) { root.previewFlipV = v === "1" }
-        }
-        Text {
-          width: parent.width
-          wrapMode: Text.Wrap
-          text: "Mirrors the preview top-to-bottom. Does not change the USB or HDMI feed."
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          height: flipGroup.implicitHeight
+          ButtonGroup {
+            id: flipGroup
+            anchors.horizontalCenter: parent.horizontalCenter
+            options: [{ value: "0", label: "Off" }, { value: "1", label: "On" }]
+            value: root.previewFlipV ? "1" : "0"
+            foreground: root.foreground
+            background: Color.popups.background
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            onChanged: function(v) { root.previewFlipV = v === "1" }
+          }
         }
       }
+      EnumRow { title: "HDMI color"; name: "hdmi-color"; options: [{value:"0",label:"Auto"},{value:"1",label:"RGB"},{value:"2",label:"YUV422"}] }
+      EnumRow { title: "HDMI format"; name: "hdmi-format"; options: [{value:"0",label:"Auto"},{value:"1",label:"4K"},{value:"2",label:"1080p"},{value:"3",label:"720p"}] }
     }
   }
 
   Component {
     id: imageTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
+    CardGrid {
       SliderRow { title: "Sharpness"; name: "sharpness"; minimum: -10; maximum: 30 }
       SliderRow { title: "Contrast"; name: "contrast" }
       SliderRow { title: "Saturation"; name: "saturation" }
@@ -1157,145 +1264,149 @@ Item {
 
   Component {
     id: afcAreaControls
-    Column {
-      width: parent ? parent.width : 0
-      spacing: Style.space(4)
-      Text {
-        text: "AF area"
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: true
-      }
-      ButtonGroup {
+    SettingCard {
+      title: "AF area"
+      Item {
         width: parent.width
-        options: [{value:"0",label:"Large"},{value:"1",label:"Medium"},{value:"2",label:"Small"},{value:"3",label:"Custom"}]
-        value: root.afcCustom ? "3" : String(root.val("focus-box", 0))
-        foreground: root.foreground
-        background: Color.popups.background
-        fontFamily: root.fontFamily
-        fontSize: Style.font.caption
-        onChanged: function(v) { root.setAfcShape(v) }
+        height: afcGroup.implicitHeight
+        ButtonGroup {
+          id: afcGroup
+          anchors.horizontalCenter: parent.horizontalCenter
+          options: [{value:"0",label:"Large"},{value:"1",label:"Medium"},{value:"2",label:"Small"},{value:"3",label:"Custom"}]
+          value: root.afcCustom ? "3" : String(root.val("focus-box", 0))
+          foreground: root.foreground
+          background: Color.popups.background
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          onChanged: function(v) { root.setAfcShape(v) }
+        }
       }
     }
   }
 
   Component {
     id: focusTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
-      Column {
-        width: parent.width
-        spacing: Style.space(4)
-        Text {
-          text: "Focus mode"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
+    CardGrid {
+      SettingCard {
+        title: "Focus mode"
+        showHoverSlot: true
+        hoverTip: root.focusHoverTip
+        hint: {
+          if (!(root.focusMode === 1 || root.focusMode === 3)) return ""
+          if (root.afHint !== "") return root.afHint
+          if (root.focusMode === 1) return "Click the preview to set the focus point."
+          if (root.afcCustom) return "Drag on the preview to draw the AF box. Drag the box to move it."
+          return "Click the preview to place the AF area."
         }
-        ButtonGroup {
+        hintAlarm: root.afHint.indexOf("Stay") === 0
+        Item {
           width: parent.width
-          options: [
-            { value: "1", label: "AF-S" },
-            { value: "2", label: "Manual" },
-            { value: "3", label: "AF-C" },
-            { value: "4", label: "Face" }
-          ]
-          value: String(root.val("focus-mode", 4))
-          foreground: root.foreground
-          background: Color.popups.background
-          fontFamily: root.fontFamily
-          fontSize: Style.font.caption
-          onHovered: function(index, on) {
-            var tips = [root.focusModeTip(1), root.focusModeTip(2), root.focusModeTip(3), root.focusModeTip(4)]
-            root.focusHoverTip = on && index >= 0 && index < tips.length ? tips[index] : ""
-          }
-          onChanged: function(v) {
-            root.service.setParam("focus-mode", v)
-            var mode = Number(v)
-            if (mode === 3 && !root.afcCustom) {
-              var box = Model.afRegion(3, root.val("focus-box", 0))
-              if (box) {
-                root.localAf = box
-                root.service.setAfArea(box)
+          height: focusGroup.implicitHeight
+          ButtonGroup {
+            id: focusGroup
+            anchors.horizontalCenter: parent.horizontalCenter
+            options: [
+              { value: "1", label: "AF-S" },
+              { value: "2", label: "Manual" },
+              { value: "3", label: "AF-C" },
+              { value: "4", label: "Face" }
+            ]
+            value: String(root.val("focus-mode", 4))
+            foreground: root.foreground
+            background: Color.popups.background
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            onHovered: function(index, on) {
+              var tips = [root.focusModeTip(1), root.focusModeTip(2), root.focusModeTip(3), root.focusModeTip(4)]
+              root.focusHoverTip = on && index >= 0 && index < tips.length ? tips[index] : ""
+            }
+            onChanged: function(v) {
+              root.service.setParam("focus-mode", v)
+              var mode = Number(v)
+              if (mode === 3 && !root.afcCustom) {
+                var box = Model.afRegion(3, root.val("focus-box", 0))
+                if (box) {
+                  root.localAf = box
+                  root.service.setAfArea(box)
+                }
+                root.afHint = "Click the preview to place the AF area."
+              } else if (mode === 1) {
+                if (root.localAf)
+                  root.placeAfS(root.localAf.x + root.localAf.w / 2, root.localAf.y + root.localAf.h / 2)
+                else
+                  root.placeAfS(0.5, 0.5)
+              } else if (mode === 4) {
+                root.afHint = ""
               }
-              root.afHint = "Click the preview to place the AF area."
-            } else if (mode === 1) {
-              if (root.localAf)
-                root.placeAfS(root.localAf.x + root.localAf.w / 2, root.localAf.y + root.localAf.h / 2)
-              else
-                root.placeAfS(0.5, 0.5)
-            } else if (mode === 4) {
-              root.afHint = ""
             }
           }
         }
-        Text {
-          width: parent.width
-          text: root.focusHoverTip !== "" ? root.focusHoverTip : " "
-          elide: Text.ElideRight
-          maximumLineCount: 1
-          wrapMode: Text.NoWrap
-          opacity: root.focusHoverTip !== "" ? 1 : 0
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-        }
       }
+      EnumRow { title: "Focus speed"; name: "focus-speed"; options: [{value:"5",label:"Slow"},{value:"3",label:"Medium"},{value:"1",label:"Fast"}] }
       Loader {
-        width: parent.width
+        property int cardSpan: 2
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.preferredWidth: 1
+        Layout.minimumWidth: 0
+        Layout.preferredHeight: item ? item.implicitHeight : 0
         active: root.focusMode === 3
         visible: active
-        height: active && item ? item.implicitHeight : 0
         sourceComponent: afcAreaControls
-      }
-      Text {
-        width: parent.width
-        visible: root.focusMode === 1 || root.focusMode === 3
-        wrapMode: Text.Wrap
-        text: root.afHint !== "" ? root.afHint
-              : root.focusMode === 1
-                ? "Click the preview to set the focus point."
-                : (root.afcCustom ? "Drag on the preview to draw the AF box. Drag the box to move it."
-                                  : "Click the preview to place the AF area.")
-        color: root.afHint.indexOf("Stay") === 0 ? Color.urgent : root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+        onVisibleChanged: if (parent && typeof parent.scheduleReflow === "function") parent.scheduleReflow()
+        onActiveChanged: if (parent && typeof parent.scheduleReflow === "function") parent.scheduleReflow()
       }
       SliderRow {
         title: "Manual focus"
         name: "manu-focus"
+        cardSpan: 2
         visible: root.focusMode === 2 && service.paramOk("manu-focus")
       }
-      EnumRow { title: "Lens correction"; name: "distortion"; fallback: "1"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-      EnumRow { title: "Focus speed"; name: "focus-speed"; options: [{value:"5",label:"Slow"},{value:"3",label:"Medium"},{value:"1",label:"Fast"}] }
+      EnumRow { title: "Lens correction"; name: "distortion"; fallback: "1"; cardSpan: 2; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
     }
   }
 
   Component {
     id: zoomTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
-      Column {
-        width: parent.width
-        spacing: Style.space(4)
-        Text {
-          text: "Zoom"
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
+    CardGrid {
+      SettingCard {
+        Layout.columnSpan: 2
+        title: "Zoom"
+        header: Rectangle {
+          id: zstep
+          width: Style.space(78)
+          height: Style.space(28)
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+          TextInput {
+            id: zbox
+            anchors.fill: parent
+            anchors.margins: Style.space(6)
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: TextInput.AlignHCenter
+            text: Model.zoomMult(root.val("zoom", 50)).toFixed(1)
+            onEditingFinished: {
+              var n = Number(text)
+              if (isNaN(n)) { text = Model.zoomMult(root.val("zoom", 50)).toFixed(1); return }
+              n = Math.max(1, Math.min(4, n))
+              root.service.setParam("zoom", Model.zoomRaw(n))
+              text = Number(n).toFixed(1)
+            }
+          }
         }
         Item {
           width: parent.width
           height: zsl.height
           PanelSlider {
             id: zsl
-            width: parent.width - Style.space(86)
+            anchors.left: wMark.right
+            anchors.right: tMark.left
+            anchors.leftMargin: Style.space(6)
+            anchors.rightMargin: Style.space(6)
             bar: root.bar
             minimum: 1
             maximum: 4
@@ -1304,6 +1415,28 @@ Item {
             value: Model.zoomMult(root.val("zoom", 50))
             onMoved: function(v) { zbox.text = Number(v).toFixed(1) }
             onReleased: function(v) { root.service.setParam("zoom", Model.zoomRaw(v)) }
+          }
+          Text {
+            id: wMark
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: "W"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.weight: Font.DemiBold
+          }
+          Text {
+            id: tMark
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: "T"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.weight: Font.DemiBold
           }
           MouseArea {
             anchors.fill: zsl
@@ -1319,7 +1452,7 @@ Item {
             color: Color.tooltip.background
             border.color: Color.tooltip.border
             border.width: 1
-            x: Math.max(0, Math.min(zsl.width - width, zsl.width * zsl.progress - width / 2))
+            x: Math.max(0, Math.min(parent.width - width, zsl.x + zsl.width * zsl.progress - width / 2))
             y: {
               var gy = zsl.mapToItem(scrollArea, 0, 0).y
               if (gy < height + Style.space(12)) return zsl.height + Style.space(4)
@@ -1328,68 +1461,21 @@ Item {
             Text {
               id: ztip
               anchors.centerIn: parent
+              textFormat: Text.PlainText
               text: Number(zsl.liveValue).toFixed(1) + "×"
               color: Color.tooltip.text
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
           }
-          Rectangle {
-            anchors.right: parent.right
-            width: Style.space(78)
-            height: Style.space(28)
-            radius: Style.cornerRadius
-            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-            border.width: 1
-            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
-            TextInput {
-              id: zbox
-              anchors.fill: parent
-              anchors.margins: Style.space(6)
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              text: Model.zoomMult(root.val("zoom", 50)).toFixed(1)
-              onEditingFinished: {
-                var n = Number(text)
-                if (isNaN(n)) { text = Model.zoomMult(root.val("zoom", 50)).toFixed(1); return }
-                n = Math.max(1, Math.min(4, n))
-                root.service.setParam("zoom", Model.zoomRaw(n))
-                text = Number(n).toFixed(1)
-              }
-            }
-          }
-        }
-        Item {
-          width: parent.width
-          height: wMark.implicitHeight
-          Text {
-            id: wMark
-            text: "W"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-          Text {
-            anchors.right: parent.right
-            text: "T"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
         }
       }
-
     }
   }
 
   Component {
     id: exposureTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
+    CardGrid {
       EnumRow { title: "Exposure"; name: "exposure-mode"; options: [{value:"0",label:"Auto"},{value:"1",label:"Manual"}] }
       SliderRow {
         title: "EV"
@@ -1439,34 +1525,33 @@ Item {
           return true
         }
       }
-      Row {
-        width: parent.width
-        spacing: Style.space(10)
-        EnumRow { width: (parent.width - parent.spacing) / 2; title: "HDR"; name: "hdr"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-        EnumRow { width: (parent.width - parent.spacing) / 2; title: "Lock"; name: "exposure-lock"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-      }
+      EnumRow { title: "HDR"; name: "hdr"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
+      EnumRow { title: "Lock"; name: "exposure-lock"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
     }
   }
 
   Component {
     id: wbTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
+    CardGrid {
       EnumRow { title: "White balance"; name: "wb-mode"; options: [{value:"1",label:"Auto"},{value:"0",label:"Manual"}] }
-      Column {
-        width: parent.width
-        spacing: Style.space(10)
+      SliderRow {
+        title: "WB"
+        name: "wb-temp"
+        minimum: 2000
+        maximum: 10000
+        step: 50
         visible: Number(root.val("wb-mode", 1)) === 0
-        SliderRow {
-          title: "WB"
-          name: "wb-temp"
-          minimum: 2000
-          maximum: 10000
-          step: 50
-          formatLive: function(v) { return String(Math.round(v)) }
-        }
-        SliderRow { title: "Tone"; name: "wb-tone"; maximum: 128 }
+        formatLive: function(v) { return String(Math.round(v)) }
+      }
+      SliderRow {
+        title: "Tone"
+        name: "wb-tone"
+        maximum: 128
+        visible: Number(root.val("wb-mode", 1)) === 0
+      }
+      SettingCard {
+        title: "Picker"
+        visible: Number(root.val("wb-mode", 1)) === 0
         Item {
           width: parent.width
           height: wbPad.height
@@ -1509,14 +1594,22 @@ Item {
                 wbPad.requestPaint()
               }
             }
+            Connections {
+              target: service
+              function onValuesChanged() { if (wbPad.visible) wbPad.requestPaint() }
+            }
           }
         }
-        Connections {
-          target: service
-          function onValuesChanged() { if (wbPad.visible) wbPad.requestPaint() }
-        }
-        WbOffsetRow { title: "Red offset"; channel: "r" }
-        WbOffsetRow { title: "Blue offset"; channel: "b" }
+      }
+      WbOffsetRow {
+        title: "Red offset"
+        channel: "r"
+        visible: Number(root.val("wb-mode", 1)) === 0
+      }
+      WbOffsetRow {
+        title: "Blue offset"
+        channel: "b"
+        visible: Number(root.val("wb-mode", 1)) === 0
       }
       EnumRow { title: "WB lock"; name: "wb-lock"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
     }
@@ -1524,43 +1617,60 @@ Item {
 
   Component {
     id: audioTab
-    Column {
-      width: parent.width
-      spacing: Style.space(10)
+    CardGrid {
       SliderRow { title: "Volume"; name: "audio-volume" }
-      EnumRow { title: "Denoise"; name: "audio-denoise"; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
-      EnumRow { title: "Auto gain"; name: "audio-agc"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-      EnumRow { title: "Input"; name: "mic-type"; options: [{value:"0",label:"Line"},{value:"1",label:"Mic"}] }
       SliderRow { title: "Delay (ms)"; name: "audio-delay"; maximum: 400 }
+      EnumRow { title: "Input"; name: "mic-type"; options: [{value:"0",label:"Line"},{value:"1",label:"Mic"}] }
+      EnumRow { title: "Auto gain"; name: "audio-agc"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
+      EnumRow { title: "Noise cancellation"; name: "audio-denoise"; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
     }
   }
 
   Component {
     id: statusTab
-    Column {
-      width: parent.width
-      spacing: Style.space(8)
-      Text {
-        width: parent.width
-        wrapMode: Text.Wrap
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        text: "Model     " + (service.selectedModel === "s3" ? "S3" : "S7") + "\n"
-            + "Firmware  " + (service.firmware || "—") + "\n"
-            + "Serial    " + (service.serial || "—") + "\n"
-            + "Control   " + (service.cameraIp || "—") + "\n"
-            + "UVC       " + (service.videoDevice || "—") + "\n"
-            + "Lens      " + (root.val("lens-status", "—") === 1 || root.val("lens-status", "—") === "1" ? "mounted" : String(root.val("lens-status", "—")))
+    CardGrid {
+      SettingCard {
+        title: "Model"
+        valueText: service.selectedModel === "s3" ? "S3" : "S7"
       }
-      PanelActionButton {
-        iconText: "󰑐"
-        tooltipText: "Refresh from camera"
-        foreground: root.foreground
-        fontFamily: root.fontFamily
-        onClicked: {
-          if (typeof service.send === "function") service.send({ cmd: "tab", name: "status" })
-          service.refresh()
+      SettingCard {
+        title: "Firmware"
+        valueText: service.firmware || "—"
+      }
+      SettingCard {
+        title: "Serial"
+        valueText: service.serial || "—"
+      }
+      SettingCard {
+        title: "Control"
+        valueText: service.cameraIp || "—"
+      }
+      SettingCard {
+        title: "UVC"
+        valueText: service.videoDevice || "—"
+      }
+      SettingCard {
+        title: "Lens"
+        valueText: root.val("lens-status", "—") === 1 || root.val("lens-status", "—") === "1" ? "mounted" : String(root.val("lens-status", "—"))
+      }
+      Item {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.columnSpan: 2
+        Layout.preferredWidth: 1
+        implicitHeight: refreshBtn.height
+        height: refreshBtn.height
+        PanelActionButton {
+          id: refreshBtn
+          anchors.horizontalCenter: parent.horizontalCenter
+          iconText: "󰑐"
+          tooltipText: "Refresh from camera"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: {
+            if (typeof service.send === "function") service.send({ cmd: "tab", name: "status" })
+            service.refresh()
+          }
         }
       }
     }
