@@ -384,4 +384,32 @@ Item {
     onTriggered: root.applyStatus = ""
   }
 
+  IpcHandler {
+    target: "yolocam"
+    function refresh(): string { root.refresh(); return "ok" }
+    function iso(v: string): string { root.setParam("iso", v); return "ok" }
+    function shutter(v: string): string { root.setParam("shutter-us", v); return "ok" }
+    function scene(_v: string): string { return "unsupported" }
+    function focusMode(v: string): string { root.setParam("focus-mode", v); return "ok" }
+    function zoom(v: string): string { root.setParam("zoom", v); return "ok" }
+    function state(): string {
+      return JSON.stringify({
+        usb: root.usb,
+        control: root.control,
+        glyph: root.glyphCode,
+        selected: root.selectedModel,
+        cameras: root.cameras,
+        serial: root.serial,
+        firmware: root.firmware,
+        preview: root.previewOn,
+        previewBusy: root.previewBusy,
+        previewHolder: root.previewHolder,
+        lensCovered: root.lensCovered,
+        applyStatus: root.applyStatus,
+        error: root.lastError,
+        values: root.values
+      })
+    }
+  }
+
 }

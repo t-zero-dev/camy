@@ -1,8 +1,8 @@
 # Helper CLI
 
-`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The bar widget runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`status` firmware probe, `get`, `set`, `probe`, `get-all`) fail or wedge the camera if watch is already connected.
+`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The plugin service runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`status` firmware probe, `get`, `set`, `probe`, `get-all`) fail or wedge the camera if watch is already connected.
 
-Use `yolocam ctl` to send JSON to a running watch, or close the panel / stop the widget first.
+Use `yolocam ctl` to send JSON to a running watch, or close the window / stop the service first.
 
 ```bash
 BIN=~/.config/omarchy/plugins/yolocam/bin/yolocam

@@ -7,11 +7,16 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-Panel {
+Item {
   id: root
-  moduleName: "yolocam"
-  ipcTarget: "yolocam"
-  manageIpc: false
+
+  property var shell: null
+  property var manifest: null
+  property var settings: ({})
+  property var service: localService
+  property var bar: null
+  property bool opened: false
+  property bool closingFromHost: false
 
   property string tab: "exposure"
   property string previewOrientation: "16:9"
@@ -40,9 +45,6 @@ Panel {
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property var sharedService: bar && bar.shell && typeof bar.shell.serviceFor === "function"
-    ? bar.shell.serviceFor(moduleName) : null
-  readonly property var service: sharedService || localService
   readonly property bool present: service.usb === true
   readonly property string camGlyph: present ? "󰄀" : "󰵝"
   readonly property int glyphCode: Number(service.glyphCode || 0)
@@ -102,6 +104,32 @@ Panel {
 
   onTabChanged: if (service && typeof service.send === "function") service.send({ cmd: "tab", name: tab })
 
+  function open(payloadJson) {
+    closingFromHost = false
+    opened = true
+    Qt.callLater(function() {
+      if (root.opened && keyCatcher) keyCatcher.forceActiveFocus()
+    })
+  }
+
+  function close() {
+    closingFromHost = true
+    opened = false
+    closingFromHost = false
+  }
+
+  function toggle() {
+    if (opened) requestClose()
+    else open("{}")
+  }
+
+  function requestClose() {
+    if (shell && typeof shell.hide === "function") shell.hide("yolocam")
+    else close()
+  }
+
+  function switchPanel(_direction) {}
+
   onOpenedChanged: {
     if (!service) return
     if (opened && typeof service.send === "function") service.send({ cmd: "tab", name: tab })
@@ -141,91 +169,29 @@ Panel {
     service.setParam(name, Math.round(value))
   }
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
-
   Service {
     id: localService
-    active: sharedService === null
+    active: false
   }
 
-  IpcHandler {
-    target: root.ipcTarget
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function toggle(): void { root.toggle() }
-    function refresh(): string { service.refresh(); return "ok" }
-    function iso(v: string): string { service.setParam("iso", v); return "ok" }
-    function shutter(v: string): string { service.setParam("shutter-us", v); return "ok" }
-    function scene(_v: string): string { return "unsupported" }
-    function focusMode(v: string): string { service.setParam("focus-mode", v); return "ok" }
-    function zoom(v: string): string { service.setParam("zoom", v); return "ok" }
-    function state(): string {
-      return JSON.stringify({
-        usb: service.usb,
-        control: service.control,
-        glyph: root.glyphCode,
-        selected: service.selectedModel,
-        cameras: service.cameras,
-        serial: service.serial,
-        firmware: service.firmware,
-        preview: service.previewOn,
-        previewBusy: service.previewBusy,
-        previewHolder: service.previewHolder,
-        previewPath: service.previewPath,
-        previewReady: root.previewReady,
-        lensCovered: service.lensCovered,
-        focusRects: service.focusRects,
-        applyStatus: service.applyStatus,
-        error: service.lastError,
-        values: service.values
-      })
-    }
-  }
+  FloatingWindow {
+    id: window
+    title: "YoloCam"
+    color: Color.popups.background
+    implicitWidth: 980
+    implicitHeight: 1040
+    minimumSize: Qt.size(720, 720)
+    visible: root.opened
 
-  BarIconButton {
-    id: button
-    anchors.fill: parent
-    bar: root.bar
-    iconComponent: camIcon
-    active: service.control && present
-    activeColor: Color.accent
-    useActiveColor: true
-    dimmed: false
-    tooltipText: {
-      var a = root.modelStatusLine("s7", "YoloCam S7")
-      var b = root.modelStatusLine("s3", "YoloCam S3")
-      var n = Math.max(a.length, b.length)
-      function pad(s) {
-        while (s.length < n) s += " "
-        return s
+    onVisibleChanged: {
+      if (visible) {
+        root.opened = true
+        return
       }
-      return pad(a) + "\n" + pad(b)
+      root.opened = false
+      if (!root.closingFromHost && root.shell && typeof root.shell.hide === "function")
+        root.shell.hide("yolocam")
     }
-    onPressed: function(b) {
-      if (b === Qt.LeftButton) root.toggle()
-    }
-  }
-
-  Component {
-    id: camIcon
-    CamMark {
-      anchors.fill: parent
-      pixelSize: Style.bar.iconFont
-    }
-  }
-
-  KeyboardPanel {
-    id: panel
-    anchorItem: button
-    owner: root
-    bar: root.bar
-    open: root.opened
-    focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(520))
-    contentHeight: panel.fittedContentHeight(Style.space(720), Style.space(720))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -239,11 +205,12 @@ Panel {
           root.tab = tabs[n].id
         }
       }
-      onCloseRequested: root.close()
+      onCloseRequested: root.requestClose()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
       ColumnLayout {
         anchors.fill: parent
+        anchors.margins: Style.space(16)
         spacing: Style.space(12)
 
           Item {
@@ -300,7 +267,7 @@ Panel {
                   anchors.fill: parent
                   visible: root.heroReadouts.length === 0
                   text: heroStatus().toUpperCase()
-                  color: root.heroAlarm ? (bar ? bar.urgent : Color.urgent) : root.dim
+                  color: root.heroAlarm ? Color.urgent : root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall
                   elide: Text.ElideRight
@@ -354,13 +321,16 @@ Panel {
           Rectangle {
             id: previewFrame
             Layout.fillWidth: true
-            Layout.preferredHeight: root.portraitPreview
-              ? Math.round(Math.min(keyCatcher.width * 0.78, 420))
-              : Math.round(keyCatcher.width * 9 / 16)
+            Layout.preferredHeight: {
+              var w = Math.max(1, window.width - Style.space(32))
+              var maxH = Math.max(220, window.height - 360)
+              var native = root.portraitPreview
+                ? Math.min(w * 0.78, 480)
+                : w * 9 / 16
+              return Math.round(Math.min(native, maxH))
+            }
+            Layout.minimumHeight: 180
             width: parent.width
-            height: root.portraitPreview
-              ? Math.round(Math.min(width * 0.78, 420))
-              : Math.round(width * 9 / 16)
             radius: Style.cornerRadius
             color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06)
             readonly property bool live: root.previewReady && service.previewOn
@@ -372,8 +342,12 @@ Panel {
               id: viewBox
               anchors.horizontalCenter: parent.horizontalCenter
               anchors.verticalCenter: parent.verticalCenter
-              width: root.portraitPreview ? Math.round(parent.height * 9 / 16) : parent.width
-              height: parent.height
+              width: {
+                if (root.portraitPreview) return Math.round(parent.height * 9 / 16)
+                if (parent.width * 9 / 16 <= parent.height) return parent.width
+                return Math.round(parent.height * 16 / 9)
+              }
+              height: root.portraitPreview ? parent.height : Math.round(width * 9 / 16)
               clip: true
 
             Image {
@@ -383,7 +357,7 @@ Panel {
               height: root.portraitPreview ? parent.width : parent.height
               rotation: root.portraitPreview ? 90 : 0
               transform: Scale { origin.x: previewA.width / 2; origin.y: previewA.height / 2; xScale: 1; yScale: root.previewFlipV ? -1 : 1 }
-              fillMode: Image.PreserveAspectCrop
+              fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
               smooth: false
@@ -400,7 +374,7 @@ Panel {
               height: root.portraitPreview ? parent.width : parent.height
               rotation: root.portraitPreview ? 90 : 0
               transform: Scale { origin.x: previewB.width / 2; origin.y: previewB.height / 2; xScale: 1; yScale: root.previewFlipV ? -1 : 1 }
-              fillMode: Image.PreserveAspectCrop
+              fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
               smooth: false
@@ -468,7 +442,7 @@ Panel {
                 id: coverLabel
                 anchors.centerIn: parent
                 text: "Lens looks covered"
-                color: bar ? bar.urgent : Color.urgent
+                color: Color.urgent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: true
@@ -581,7 +555,9 @@ Panel {
 
           ButtonGroup {
             Layout.fillWidth: true
+            Layout.maximumWidth: parent.width
             width: parent.width
+            clip: true
             options: root.tabList
             value: root.tab
             foreground: root.foreground
@@ -598,12 +574,13 @@ Panel {
             Layout.fillHeight: true
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical.policy: ScrollBar.AlwaysOn
 
             Column {
               id: panelColumn
               width: Math.max(0, scrollArea.availableWidth - Style.space(22))
               spacing: Style.space(10)
-              topPadding: Style.space(28)
+              topPadding: Style.space(16)
 
               Loader {
                 width: parent.width
@@ -619,8 +596,8 @@ Panel {
             }
           }
         }
+      }
     }
-  }
 
   function scrollPanel(wheel) {
     var bar = scrollArea.ScrollBar.vertical
@@ -1284,7 +1261,7 @@ Panel {
                 ? "Click the preview to set the focus point."
                 : (root.afcCustom ? "Drag on the preview to draw the AF box. Drag the box to move it."
                                   : "Click the preview to place the AF area.")
-        color: root.afHint.indexOf("Stay") === 0 ? (root.bar ? root.bar.urgent : Color.urgent) : root.dim
+        color: root.afHint.indexOf("Stay") === 0 ? Color.urgent : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }

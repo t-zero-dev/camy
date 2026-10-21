@@ -20,9 +20,9 @@ Omarchy shell
 
 | Path | Role |
 |---|---|
-| `manifest.json` | Omarchy plugin id `yolocam`, bar widget + service |
+| `manifest.json` | Omarchy plugin id `yolocam`, service + summoned panel |
 | `Service.qml` | Long-lived `Process` running `watch`; applies events into panel state |
-| `Panel.qml` | Bar glyph and settings panel |
+| `Panel.qml` | Summoned FloatingWindow titled YoloCam |
 | `Model.js` | Shared labels, zoom/EV/shutter formatting |
 | `bin/yolocam` | Release helper |
 | `helper/` | Rust crate (MIT) |
