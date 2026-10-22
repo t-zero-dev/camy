@@ -178,8 +178,8 @@ Item {
     id: window
     title: "YoloCam"
     color: Color.popups.background
-    implicitWidth: 980
-    implicitHeight: 1040
+    implicitWidth: 720
+    implicitHeight: 1220
     minimumSize: Qt.size(720, 720)
     visible: root.opened
 
@@ -566,12 +566,13 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            padding: 0
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
             Column {
               id: panelColumn
-              width: Math.max(0, scrollArea.availableWidth - Style.space(22))
+              width: previewFrame.width
               spacing: Style.spacing.panelGap
               topPadding: Style.space(8)
 
