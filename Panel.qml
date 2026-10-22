@@ -23,6 +23,7 @@ Item {
   property bool previewFlipV: false
   readonly property bool portraitPreview: previewOrientation === "9:16"
   property bool cursorActive: false
+  property bool cameraSwitchPending: false
   readonly property int focusMode: Number(val("focus-mode", 4))
   readonly property string holderIcon: {
     var k = String(service.previewHolderKind || "")
@@ -102,7 +103,17 @@ Item {
   onServiceChanged: pushSettings()
   Component.onCompleted: pushSettings()
 
-  onTabChanged: if (service && typeof service.send === "function") service.send({ cmd: "tab", name: tab })
+  onTabChanged: {
+    if (service && typeof service.send === "function") service.send({ cmd: "tab", name: tab })
+    resetScroll()
+    Qt.callLater(function() {
+      var g = currentGrid()
+      if (g) {
+        g.selectedIndex = 0
+        if (typeof g.applySelection === "function") g.applySelection()
+      }
+    })
+  }
 
   function open(payloadJson) {
     closingFromHost = false
@@ -161,12 +172,202 @@ Item {
       previewA.source = ""
       previewB.source = ""
     }
+    function onSelectedModelChanged() { root.queueCameraRelayout() }
+    function onUnsupportedChanged() {
+      if (root.cameraSwitchPending) root.queueCameraRelayout()
+      else root.scheduleGridReflow()
+    }
+  }
+
+  Timer {
+    id: cameraRelayout
+    interval: 200
+    repeat: false
+    onTriggered: {
+      root.cameraSwitchPending = false
+      root.rebuildCurrentTab()
+    }
   }
 
   function val(name, fallback) { return service.valueOf(name, fallback) }
 
   function setNum(name, value) {
     service.setParam(name, Math.round(value))
+  }
+
+  property var editingBox: null
+
+  function cameraIds() {
+    var ids = []
+    var list = service.cameras || []
+    for (var i = 0; i < list.length; i++) {
+      var m = String(list[i].model || "")
+      if (m && ids.indexOf(m) < 0) ids.push(m)
+    }
+    if (!ids.length) {
+      if (root.hasS7) ids.push("s7")
+      if (root.hasS3) ids.push("s3")
+    }
+    return ids
+  }
+
+  function cycleCamera(dir) {
+    var ids = cameraIds()
+    if (ids.length < 2) return
+    var cur = String(service.selectedModel || "")
+    var i = ids.indexOf(cur)
+    if (i < 0) i = 0
+    var n = (i + dir + ids.length) % ids.length
+    service.selectModel(ids[n])
+    if (typeof service.send === "function") service.send({ cmd: "tab", name: root.tab })
+  }
+
+  function jumpCamera(n) {
+    var ids = cameraIds()
+    if (n < 1 || n > ids.length) return
+    service.selectModel(ids[n - 1])
+    if (typeof service.send === "function") service.send({ cmd: "tab", name: root.tab })
+  }
+
+  function cycleTab(dir) {
+    var tabs = root.tabList
+    if (!tabs.length) return
+    var i = 0
+    for (var t = 0; t < tabs.length; t++) if (tabs[t].value === root.tab) i = t
+    root.tab = tabs[(i + dir + tabs.length) % tabs.length].value
+  }
+
+  function jumpTab(n) {
+    var tabs = root.tabList
+    if (n < 1 || n > tabs.length) return
+    root.tab = tabs[n - 1].value
+  }
+
+  function currentGrid() {
+    return tabLoader && tabLoader.item ? tabLoader.item : null
+  }
+
+  function moveCard(delta) {
+    var g = currentGrid()
+    if (g && typeof g.moveSelect === "function") g.moveSelect(delta)
+  }
+
+  function flickableOf(scroll) {
+    if (!scroll) return null
+    var item = scroll.contentItem
+    if (item && item.contentY !== undefined) return item
+    return null
+  }
+
+  function resetScroll() {
+    var flick = flickableOf(scrollArea)
+    if (flick) flick.contentY = 0
+  }
+
+  function ensureCardInView() {
+    var g = currentGrid()
+    var card = g && typeof g.currentItem === "function" ? g.currentItem() : null
+    if (!card || !scrollArea || !panelColumn) return
+    var y0 = card.mapToItem(panelColumn, 0, 0).y
+    var y1 = y0 + Math.max(1, card.height || card.implicitHeight)
+    var margin = Style.space(8)
+    var flick = flickableOf(scrollArea)
+    if (flick) {
+      var viewH = flick.height
+      var maxY = Math.max(0, (flick.contentHeight || panelColumn.implicitHeight) - viewH)
+      if (y0 < flick.contentY + margin)
+        flick.contentY = Math.max(0, Math.min(maxY, y0 - margin))
+      else if (y1 > flick.contentY + viewH - margin)
+        flick.contentY = Math.max(0, Math.min(maxY, y1 - viewH + margin))
+      return
+    }
+    var bar = scrollArea.ScrollBar.vertical
+    if (!bar || bar.size >= 1) return
+    var contentH = Math.max(1, panelColumn.implicitHeight)
+    var viewH = bar.size * contentH
+    var pos = bar.position * contentH
+    if (y0 < pos + margin)
+      bar.position = Math.max(0, (y0 - margin) / contentH)
+    else if (y1 > pos + viewH - margin)
+      bar.position = Math.max(0, Math.min(1 - bar.size, (y1 - viewH + margin) / contentH))
+  }
+
+  function scheduleGridReflow() {
+    Qt.callLater(function() {
+      var g = currentGrid()
+      if (g && typeof g.reflow === "function") g.reflow()
+    })
+  }
+
+  function queueCameraRelayout() {
+    cameraSwitchPending = true
+    cameraRelayout.restart()
+  }
+
+  // Same effect as cycling tabs: GridLayout keeps stale rows after
+  // selectModel clears unsupported and caps hides cards again.
+  function rebuildCurrentTab() {
+    if (!tabLoader) return
+    tabLoader.active = false
+    Qt.callLater(function() {
+      if (!tabLoader) return
+      tabLoader.active = true
+      Qt.callLater(function() {
+        var g = currentGrid()
+        if (!g) return
+        g.selectedIndex = 0
+        if (typeof g.reflow === "function") g.reflow()
+        else if (typeof g.applySelection === "function") g.applySelection()
+        root.resetScroll()
+      })
+    })
+  }
+
+  function selectedCard() {
+    var g = currentGrid()
+    return g && typeof g.currentItem === "function" ? g.currentItem() : null
+  }
+
+  function nudgeCard(dir, big) {
+    var c = selectedCard()
+    if (c && typeof c.nudge === "function") c.nudge(dir, !!big)
+  }
+
+  function activateCard() {
+    var c = selectedCard()
+    if (c && typeof c.activateCard === "function") c.activateCard()
+  }
+
+  function typeCardDigit(t) {
+    var c = selectedCard()
+    if (c && typeof c.typeDigit === "function") c.typeDigit(t)
+  }
+
+  function beginEdit(box) {
+    if (!box) return
+    root.editingBox = box
+    box.forceActiveFocus()
+    box.selectAll()
+  }
+
+  function leaveField() {
+    if (root.editingBox) {
+      if (typeof root.editingBox.editingFinished === "function")
+        root.editingBox.editingFinished()
+      root.editingBox.focus = false
+      root.editingBox = null
+    }
+    if (keyCatcher) keyCatcher.forceActiveFocus()
+  }
+
+  function refreshStatus() {
+    if (root.tab !== "status") return
+    if (typeof service.send === "function") service.send({ cmd: "tab", name: "status" })
+    service.refresh()
+  }
+
+  function togglePreview() {
+    service.setPreview(!service.previewOn)
   }
 
   Service {
@@ -193,20 +394,98 @@ Item {
         root.shell.hide("yolocam")
     }
 
-    PanelKeyCatcher {
+    Item {
       id: keyCatcher
       anchors.fill: parent
-      onMoveRequested: function(dx, dy) {
-        if (dy !== 0) {
-          var tabs = Model.TABS
-          var i = 0
-          for (var t = 0; t < tabs.length; t++) if (tabs[t].id === root.tab) i = t
-          var n = (i + dy + tabs.length) % tabs.length
-          root.tab = tabs[n].id
+      focus: true
+      Keys.priority: Keys.BeforeItem
+      readonly property bool blocked: root.editingBox !== null
+
+      Keys.onPressed: function(event) {
+        var ctrl = !!(event.modifiers & Qt.ControlModifier)
+        var alt = !!(event.modifiers & Qt.AltModifier)
+        var shift = !!(event.modifiers & Qt.ShiftModifier)
+
+        if (blocked) {
+          if (event.key === Qt.Key_Escape) {
+            root.leaveField()
+            event.accepted = true
+          }
+          return
+        }
+
+        if (event.key === Qt.Key_Escape) {
+          root.requestClose()
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Space) {
+          root.togglePreview()
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+          var back = shift || event.key === Qt.Key_Backtab
+          if (ctrl) root.cycleTab(back ? -1 : 1)
+          else root.moveCard(back ? -1 : 1)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_F5 || (ctrl && event.key === Qt.Key_R)) {
+          root.refreshStatus()
+          event.accepted = true
+          return
+        }
+        if (ctrl && event.key >= Qt.Key_1 && event.key <= Qt.Key_8) {
+          root.jumpTab(event.key - Qt.Key_1 + 1)
+          event.accepted = true
+          return
+        }
+        if (alt && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
+          root.jumpCamera(event.key - Qt.Key_1 + 1)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_BracketLeft || event.text === "[") {
+          root.cycleCamera(-1)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_BracketRight || event.text === "]") {
+          root.cycleCamera(1)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Down || event.key === Qt.Key_J || event.text === "j") {
+          root.moveCard(1)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Up || event.key === Qt.Key_K || event.text === "k") {
+          root.moveCard(-1)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Right || event.key === Qt.Key_L || event.text === "l") {
+          root.nudgeCard(1, shift)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Left || event.key === Qt.Key_H || event.text === "h") {
+          root.nudgeCard(-1, shift)
+          event.accepted = true
+          return
+        }
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+          root.activateCard()
+          event.accepted = true
+          return
+        }
+        if (!ctrl && !alt && event.text && event.text.length === 1 && event.text >= "0" && event.text <= "9") {
+          root.typeCardDigit(event.text)
+          event.accepted = true
         }
       }
-      onCloseRequested: root.requestClose()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
 
       ColumnLayout {
         anchors.fill: parent
@@ -577,7 +856,9 @@ Item {
               topPadding: Style.space(8)
 
               Loader {
+                id: tabLoader
                 width: parent.width
+                height: item ? item.implicitHeight : 0
                 sourceComponent: root.tab === "video" ? videoTab
                   : root.tab === "image" ? imageTab
                   : root.tab === "focus" ? focusTab
@@ -846,6 +1127,8 @@ Item {
         hid[h].Layout.preferredWidth = 0
         hid[h].Layout.maximumWidth = 0
       }
+      if (typeof grid.forceLayout === "function") grid.forceLayout()
+      applySelection()
     }
 
     function scheduleReflow() {
@@ -854,6 +1137,52 @@ Item {
 
     onChildrenChanged: scheduleReflow()
     Component.onCompleted: scheduleReflow()
+
+    property int selectedIndex: 0
+
+    function visibleItems() {
+      var vis = []
+      for (var i = 0; i < children.length; i++) {
+        if (children[i] && children[i].visible) vis.push(children[i])
+      }
+      return vis
+    }
+
+    function selectableItems() {
+      var vis = []
+      for (var i = 0; i < children.length; i++) {
+        var c = children[i]
+        if (c && c.visible && c.cardSelectable !== false) vis.push(c)
+      }
+      return vis
+    }
+
+    function applySelection() {
+      var vis = selectableItems()
+      if (selectedIndex >= vis.length) selectedIndex = Math.max(0, vis.length - 1)
+      if (selectedIndex < 0) selectedIndex = 0
+      for (var i = 0; i < children.length; i++) {
+        var c = children[i]
+        if (c && c.cardSelected !== undefined) c.cardSelected = false
+      }
+      if (vis.length && vis[selectedIndex].cardSelected !== undefined)
+        vis[selectedIndex].cardSelected = true
+      Qt.callLater(function() { root.ensureCardInView() })
+    }
+
+    function moveSelect(delta) {
+      var vis = selectableItems()
+      if (!vis.length) return
+      selectedIndex = (selectedIndex + delta + vis.length) % vis.length
+      applySelection()
+    }
+
+    function currentItem() {
+      var vis = selectableItems()
+      if (!vis.length) return null
+      if (selectedIndex < 0 || selectedIndex >= vis.length) return vis[0]
+      return vis[selectedIndex]
+    }
   }
 
   component SettingCard: Rectangle {
@@ -867,6 +1196,62 @@ Item {
     property string hoverTip: ""
     property bool showHoverSlot: false
     property int cardSpan: 0
+    property bool cardSelected: false
+    property bool cardSelectable: true
+
+    function findGroup() {
+      function walk(node) {
+        if (!node) return null
+        if (typeof node.selectedOptionIndex === "function" && node.options !== undefined)
+          return node
+        var kids = node.children
+        if (!kids) return null
+        for (var i = 0; i < kids.length; i++) {
+          var g = walk(kids[i])
+          if (g) return g
+        }
+        return null
+      }
+      return walk(extraColumn)
+    }
+
+    function nudge(dir, big) {
+      if (typeof sliderNudge === "function") {
+        sliderNudge(dir, big)
+        return
+      }
+      var g = findGroup()
+      if (!g || !g.options || !g.options.length) return
+      var i = g.selectedOptionIndex()
+      if (i < 0) i = 0
+      var n = i + dir
+      if (n < 0) n = g.options.length - 1
+      if (n >= g.options.length) n = 0
+      g.changed(g.optionValue(g.options[n]))
+      g.cursorIndex = n
+    }
+
+    function activateCard() {
+      if (typeof sliderActivate === "function") {
+        sliderActivate()
+        return
+      }
+      var g = findGroup()
+      if (g && g.options && g.options.length === 2) nudge(1, false)
+    }
+
+    function focusField() {
+      if (typeof sliderFocusField === "function") sliderFocusField()
+    }
+
+    function typeDigit(t) {
+      if (typeof sliderTypeDigit === "function") sliderTypeDigit(t)
+    }
+
+    onCardSelectedChanged: {
+      var g = findGroup()
+      if (g) g.cursorIndex = cardSelected ? g.selectedOptionIndex() : -1
+    }
 
     Layout.fillWidth: true
     Layout.fillHeight: true
@@ -884,8 +1269,8 @@ Item {
     }
     radius: Style.cornerRadius
     color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-    border.width: Style.normalBorderWidth
-    border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+    border.width: cardSelected ? Math.max(2, Style.normalBorderWidth) : Style.normalBorderWidth
+    border.color: cardSelected ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
     implicitHeight: inner.implicitHeight + Style.space(15) * 2
 
     Column {
@@ -1003,6 +1388,7 @@ Item {
         background: Color.popups.background
         fontFamily: root.fontFamily
         fontSize: Style.font.caption
+        focusable: false
         onChanged: function(v) { root.service.setParam(erow.name, v) }
       }
     }
@@ -1015,6 +1401,19 @@ Item {
       var o = root.val("wb-offset", { r: 10, b: 10 })
       return Number(channel === "r" ? (o && o.r) : (o && o.b)) || 10
     }
+
+    function sliderNudge(dir, big) {
+      var step = big ? 5 : 1
+      var n = wbOff.cur + dir * step
+      n = Math.max(0, Math.min(20, n))
+      var o = root.val("wb-offset", { r: 10, b: 10 })
+      var r = Number(o && o.r) || 10
+      var b = Number(o && o.b) || 10
+      if (channel === "r") r = n
+      else b = n
+      service.setWbOffset(r, b)
+    }
+
     header: Text {
       textFormat: Text.PlainText
       text: String(wbOff.cur)
@@ -1070,6 +1469,26 @@ Item {
     }
     visible: service.paramOk(name)
 
+    function sliderNudge(dir, big) {
+      var span = srow.maximum - srow.minimum
+      var step = big ? Math.max(srow.step * 10, span / 20) : srow.step
+      var n = Number(root.val(srow.name, srow.minimum)) + dir * step
+      n = Math.max(srow.minimum, Math.min(srow.maximum, n))
+      if (srow.integer) n = Math.round(n)
+      else n = Math.round(n / srow.step) * srow.step
+      root.setNum(srow.name, n)
+      box.text = srow.formatLive(n)
+    }
+
+    function sliderActivate() { root.beginEdit(box) }
+    function sliderFocusField() { root.beginEdit(box) }
+    function sliderTypeDigit(t) {
+      root.editingBox = box
+      box.forceActiveFocus()
+      box.text = t
+      box.cursorPosition = String(t).length
+    }
+
     header: Rectangle {
       id: stepper
       width: Style.space(78)
@@ -1102,6 +1521,8 @@ Item {
           if (srow.integer) n = Math.round(n)
           root.setNum(srow.name, n)
           text = srow.formatLive(n)
+          root.editingBox = null
+          if (keyCatcher) keyCatcher.forceActiveFocus()
         }
       }
 
@@ -1346,6 +1767,7 @@ Item {
       EnumRow { title: "Focus speed"; name: "focus-speed"; options: [{value:"5",label:"Slow"},{value:"3",label:"Medium"},{value:"1",label:"Fast"}] }
       Loader {
         property int cardSpan: 2
+        property bool cardSelected: false
         Layout.fillWidth: true
         Layout.fillHeight: true
         Layout.preferredWidth: 1
@@ -1354,6 +1776,10 @@ Item {
         active: root.focusMode === 3
         visible: active
         sourceComponent: afcAreaControls
+        onCardSelectedChanged: if (item && item.cardSelected !== undefined) item.cardSelected = cardSelected
+        onItemChanged: if (item && item.cardSelected !== undefined) item.cardSelected = cardSelected
+        function nudge(dir, big) { if (item && typeof item.nudge === "function") item.nudge(dir, big) }
+        function activateCard() { if (item && typeof item.activateCard === "function") item.activateCard() }
         onVisibleChanged: if (parent && typeof parent.scheduleReflow === "function") parent.scheduleReflow()
         onActiveChanged: if (parent && typeof parent.scheduleReflow === "function") parent.scheduleReflow()
       }
@@ -1373,6 +1799,24 @@ Item {
       SettingCard {
         Layout.columnSpan: 2
         title: "Zoom"
+
+        function sliderNudge(dir, big) {
+          var step = big ? 0.5 : 0.1
+          var n = Model.zoomMult(root.val("zoom", 50)) + dir * step
+          n = Math.max(1, Math.min(4, n))
+          n = Math.round(n * 10) / 10
+          root.service.setParam("zoom", Model.zoomRaw(n))
+          zbox.text = Number(n).toFixed(1)
+        }
+        function sliderActivate() { root.beginEdit(zbox) }
+        function sliderFocusField() { root.beginEdit(zbox) }
+        function sliderTypeDigit(t) {
+          root.editingBox = zbox
+          zbox.forceActiveFocus()
+          zbox.text = t
+          zbox.cursorPosition = String(t).length
+        }
+
         header: Rectangle {
           id: zstep
           width: Style.space(78)
@@ -1396,6 +1840,8 @@ Item {
               n = Math.max(1, Math.min(4, n))
               root.service.setParam("zoom", Model.zoomRaw(n))
               text = Number(n).toFixed(1)
+              root.editingBox = null
+              if (keyCatcher) keyCatcher.forceActiveFocus()
             }
           }
         }
@@ -1632,35 +2078,52 @@ Item {
     CardGrid {
       SettingCard {
         title: "Model"
+        cardSelectable: false
         valueText: service.selectedModel === "s3" ? "S3" : "S7"
       }
       SettingCard {
         title: "Firmware"
+        cardSelectable: false
         valueText: service.firmware || "—"
       }
       SettingCard {
         title: "Serial"
+        cardSelectable: false
         valueText: service.serial || "—"
       }
       SettingCard {
         title: "Control"
+        cardSelectable: false
         valueText: service.cameraIp || "—"
       }
       SettingCard {
         title: "UVC"
+        cardSelectable: false
         valueText: service.videoDevice || "—"
       }
       SettingCard {
         title: "Lens"
+        cardSelectable: false
         valueText: root.val("lens-status", "—") === 1 || root.val("lens-status", "—") === "1" ? "mounted" : String(root.val("lens-status", "—"))
       }
       Item {
+        property bool cardSelected: false
+        property bool cardSelectable: true
+        function activateCard() { root.refreshStatus() }
         Layout.fillWidth: true
         Layout.fillHeight: true
         Layout.columnSpan: 2
         Layout.preferredWidth: 1
         implicitHeight: refreshBtn.height
         height: refreshBtn.height
+        Rectangle {
+          anchors.fill: parent
+          visible: parent.cardSelected
+          color: "transparent"
+          border.width: Math.max(2, Style.normalBorderWidth)
+          border.color: Color.accent
+          radius: Style.cornerRadius
+        }
         PanelActionButton {
           id: refreshBtn
           anchors.horizontalCenter: parent.horizontalCenter
