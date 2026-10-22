@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "yolocam",
-  "name": "YoloCam",
-  "version": "0.3.0",
-  "author": "tundeo",
+  "id": "io.github.t-zero-dev.omacam",
+  "name": "Omacam",
+  "version": "0.4.0",
+  "author": "t-zero-dev",
   "license": "MIT",
-  "description": "Configure a YoloCam S7 or S3 from the Omarchy menu — exposure, focus, zoom, and a live preview.",
+  "description": "Unofficial Omarchy panel for YoloLiv YoloCam S7 and S3 — exposure, focus, zoom, and a live preview.",
   "kinds": ["service", "panel"],
   "entryPoints": {
     "service": "Service.qml",

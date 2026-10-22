@@ -1,23 +1,66 @@
 # Helper CLI
 
-`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The plugin service runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`status` firmware probe, `get`, `set`, `probe`, `get-all`) fail or wedge the camera if watch is already connected.
+`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The Omacam service runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
 
-Use `yolocam ctl` to send JSON to a running watch, or close the window / stop the service first.
+Use `yolocam ctl` or `omarchy-shell omacam …` against a running watch. Close the window / stop the service before a second TCP client.
 
 ```bash
-BIN=~/.config/omarchy/plugins/yolocam/bin/yolocam
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
+BIN="$PLUGIN/bin/yolocam"
 $BIN help
+```
+
+## Shell IPC
+
+The service registers Quickshell IPC target `omacam`. These talk to watch through the panel service, not a second TCP client.
+
+```bash
+omarchy-shell omacam state
+omarchy-shell omacam iso 400
+omarchy-shell omacam shutter 16666
+omarchy-shell omacam zoom 66
+omarchy-shell omacam focusMode 4
+omarchy-shell omacam refresh
+```
+
+`state` returns JSON: `usb`, `control`, `glyph`, `selected`, `cameras`, `serial`, `firmware`, `preview`, `previewBusy`, `previewHolder`, `lensCovered`, `applyStatus`, `error`, `values`.
+
+`scene` is registered and returns `unsupported`.
+
+Open or hide the window:
+
+```bash
+omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'
+omarchy-shell shell summon io.github.t-zero-dev.omacam '{}'
+omarchy-shell shell hide io.github.t-zero-dev.omacam
 ```
 
 ## Commands
 
+### ctl
+
+Forward a JSON command to a running watch (`$XDG_RUNTIME_DIR/yolocam/ctl.sock`). This is the daily CLI while the plugin is enabled.
+
+```bash
+$BIN ctl set iso 400
+$BIN ctl set focus-mode 4
+$BIN ctl '{"cmd":"set","name":"iso","value":"400"}'
+$BIN ctl '{"cmd":"preview","on":true}'
+$BIN ctl '{"cmd":"select","model":"s3"}'
+$BIN ctl '{"cmd":"refresh"}'
+```
+
+If the socket is missing, the error is `watch not running`. Enable the plugin / restart the shell. Do not open a second TCP client.
+
 ### status
 
-USB, gadget NIC, control reachability, firmware (if watch is not holding the port), and an inventory of plugged cameras.
+USB, gadget NIC, control reachability, firmware (only if watch is **not** holding the port), and an inventory of plugged cameras.
 
 ```bash
 $BIN status
 ```
+
+When `ctl.sock` exists, `status` skips the firmware GET so it does not steal 12345. Use `omarchy-shell omacam state` for live values.
 
 ### probe
 
@@ -27,62 +70,25 @@ Version handshake (GET CID 1). Requires that watch is not running.
 
 Named parameters this helper knows: name, command ID, group, whether SET is allowed, and value kind.
 
-### get
+### get / get-all / set
 
-Read one or more named parameters.
+Own TCP 12345. Use only when watch is down.
 
 ```bash
 $BIN get iso shutter-us focus-mode
-```
-
-### get-all
-
-Read every named parameter, paced. Prefer the panel Refresh action while watch is running.
-
-### set
-
-Write a named integer or enum parameter.
-
-```bash
 $BIN set iso 400
 $BIN set focus-mode face
-$BIN set distortion on
-```
-
-White-balance offset is not a raw integer. The panel sends `r` and `b` through watch; the CLI `set` path rejects a bare number.
-
-### iso / shutter / wb-temp / aperture
-
-Aliases for `set`.
-
-```bash
 $BIN iso 400
 $BIN shutter 1/60          # or microseconds: 16666
 $BIN wb-temp 5500
 $BIN aperture 80
 ```
 
+White-balance offset is not a raw integer. The panel sends `r` and `b` through watch; the CLI `set` path rejects a bare number.
+
 ### watch
 
-JSON-lines events on stdout; commands on stdin (and on `$XDG_RUNTIME_DIR/yolocam/ctl.sock`). This is what the Omarchy service runs. See [architecture](architecture.md).
-
-### ctl
-
-Forward a JSON command to a running watch.
-
-```bash
-$BIN ctl '{"cmd":"set","name":"iso","value":"400"}'
-$BIN ctl set iso 400
-$BIN ctl '{"cmd":"preview","on":true}'
-```
-
-### recover
-
-Telnet to the camera, restart `/app/bin/live_camera_app`, and wait until port 12345 accepts. Use this when USB is present but control is refused — not a power-cycle.
-
-```bash
-$BIN recover
-```
+JSON-lines events on stdout; commands on stdin (and on `ctl.sock`). This is what the Omarchy service runs. See [architecture.md](architecture.md).
 
 ### preview
 
@@ -93,12 +99,16 @@ $BIN preview start    # until stdin closes
 $BIN preview stop
 ```
 
+### recover
+
+Parked. The binary still has the subcommand; the product must not use it. USB present and control refused: power-cycle data and power.
+
 ## Watch JSON commands
 
 The panel sends one JSON object per line. `model` is `s3` or `s7`; omitted commands hit the selected camera.
 
 | `cmd` | Fields | Effect |
-|---|---|---|
+| --- | --- | --- |
 | `select` | `model` or `id` | Switch the selected session |
 | `tab` | `name` | Reorder idle fill toward that group |
 | `get-all` | | Restart warm then remaining GETs |

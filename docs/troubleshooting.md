@@ -2,19 +2,15 @@
 
 ## USB present, control refused
 
-`yolocam status` (or the panel) shows the camera on USB but TCP `192.168.129.10:12345` or `192.168.126.10:12345` is connection-refused. `live_camera_app` on the camera has stalled.
+`omarchy-shell omacam state` (or the panel) shows the camera on USB but TCP `192.168.129.10:12345` or `192.168.126.10:12345` is connection-refused. `live_camera_app` on the camera has stalled.
 
-```bash
-~/.config/omarchy/plugins/yolocam/bin/yolocam recover
-```
-
-That telnets to the camera (`root` / `yunxi.tv` on the gadget NIC), restarts `/app/bin/live_camera_app`, and waits until 12345 accepts. If recover cannot reach the gadget network, unplug data **and** power, then plug both back.
+`yolocam recover` is parked and must not be used. Unplug data **and** power, then plug both back.
 
 Do not loop GET-all or auto-recover on GET timeout. That is what wedges the panel.
 
 ## Panel hung on Refresh
 
-Refresh is tab-only and urgent. If it still never finishes, the control socket is likely dead — recover, then reopen the panel. Watch will not restart the camera by itself.
+Refresh is tab-only and urgent. If it still never finishes, the control socket is likely dead — power-cycle the camera, then reopen the panel. Watch will not restart the camera by itself.
 
 ## Preview says busy
 
@@ -49,12 +45,14 @@ Only named parameters are SET. CID 55, 58, and 29 are not in that table; writing
 ## Build / enable
 
 ```bash
-export CARGO_TARGET_DIR=/tmp/yolocam-target
-cd ~/.config/omarchy/plugins/yolocam/helper
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
+export CARGO_TARGET_DIR=/tmp/omacam-target
+cd "$PLUGIN/helper"
 cargo test
 cargo build --release
-cp -f /tmp/yolocam-target/release/yolocam ../bin/yolocam
-omarchy plugin validate ~/.config/omarchy/plugins/yolocam
+cp /tmp/omacam-target/release/yolocam "$PLUGIN/bin/yolocam.new"
+mv -f "$PLUGIN/bin/yolocam.new" "$PLUGIN/bin/yolocam"
+omarchy plugin validate "$PLUGIN"
 ```
 
 `omarchy plugin validate` fails if `target/` (or a symlink to it) sits inside the plugin directory. After replacing the binary, restart watch (close the panel so the service can relaunch, or `omarchy restart shell`).

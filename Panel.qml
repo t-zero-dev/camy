@@ -135,7 +135,7 @@ Item {
   }
 
   function requestClose() {
-    if (shell && typeof shell.hide === "function") shell.hide("yolocam")
+    if (shell && typeof shell.hide === "function") shell.hide("io.github.t-zero-dev.omacam")
     else close()
   }
 
@@ -377,7 +377,7 @@ Item {
 
   FloatingWindow {
     id: window
-    title: "YoloCam"
+    title: "Omacam"
     color: Color.popups.background
     implicitWidth: 720
     implicitHeight: 1220
@@ -391,7 +391,7 @@ Item {
       }
       root.opened = false
       if (!root.closingFromHost && root.shell && typeof root.shell.hide === "function")
-        root.shell.hide("yolocam")
+        root.shell.hide("io.github.t-zero-dev.omacam")
     }
 
     Item {
