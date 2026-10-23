@@ -2,17 +2,17 @@
 
 The user-facing explanation is in [README.md](../README.md). This file is the contract: what lives **inside** the plugin tree, what you add **outside** it, and what the camera itself stores.
 
-Omacam does not ship a `~/.config/omacam/` directory. Camera parameters persist on the body. Window chrome persists in Hyprland and Omarchy.
+CamY does not ship a `~/.config/camy/` directory. Camera parameters persist on the body. Window chrome persists in Hyprland and Omarchy.
 
 ## Inside the plugin
 
-Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.omacam`. `omarchy plugin validate` refuses any symlink in this folder, including Cargo `target/`.
+Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin validate` refuses any symlink in this folder, including Cargo `target/`.
 
 | Path | Role |
 | --- | --- |
-| `manifest.json` | Plugin id `io.github.t-zero-dev.omacam`, kinds `service` + `panel` |
-| `Service.qml` | Long-lived `yolocam watch`; IPC target `omacam` |
-| `Panel.qml` | FloatingWindow title `Omacam`, implicit size 720×1220, minimum 720×720 |
+| `manifest.json` | Plugin id `io.github.t-zero-dev.camy`, kinds `service` + `panel` |
+| `Service.qml` | Long-lived `yolocam watch`; IPC target `camy` |
+| `Panel.qml` | FloatingWindow title `CamY`, implicit size 720×1220, minimum 720×720 |
 | `Model.js` | Tab ids, zoom/EV/shutter labels |
 | `bin/yolocam` | Release helper (gitignored; you build it) |
 | `helper/` | Rust sources (crate name `yolocam`) |
@@ -24,7 +24,7 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.omacam`. `omarchy plug
 
 ### Plugin settings object
 
-Omarchy injects the `plugins[]` entry for `io.github.t-zero-dev.omacam` as `settings` on both Service and Panel.
+Omarchy injects the `plugins[]` entry for `io.github.t-zero-dev.camy` as `settings` on both Service and Panel.
 
 | Key | Type | Default | Effect |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ No other keys are read. ISO, shutter, tab, selected camera, and preview-on are s
 
 ```json
 "plugins": [
-  { "id": "io.github.t-zero-dev.omacam" }
+  { "id": "io.github.t-zero-dev.camy" }
 ]
 ```
 
@@ -47,18 +47,18 @@ Kinds are service and panel, so enablement is this list. `omarchy plugin add …
 To disable preview from config:
 
 ```json
-{ "id": "io.github.t-zero-dev.omacam", "preview": false }
+{ "id": "io.github.t-zero-dev.camy", "preview": false }
 ```
 
 ### Window — `~/.config/hypr/hyprland.lua`
 
-The plugin never writes Hyprland. Recommended rules, title match `^Omacam`, class `org.quickshell`:
+The plugin never writes Hyprland. Recommended rules, title match `^CamY`, class `org.quickshell`:
 
 ```lua
-o.window({ title = "^Omacam" }, { float = true })
-o.window({ title = "^Omacam" }, { center = true })
-o.window({ title = "^Omacam" }, { size = "720 min(1220, monitor_h*0.90)" })
-o.window({ title = "^Omacam" }, { suppress_event = "fullscreen maximize" })
+o.window({ title = "^CamY" }, { float = true })
+o.window({ title = "^CamY" }, { center = true })
+o.window({ title = "^CamY" }, { size = "720 min(1220, monitor_h*0.90)" })
+o.window({ title = "^CamY" }, { suppress_event = "fullscreen maximize" })
 ```
 
 | Rule | Why |
@@ -68,7 +68,7 @@ o.window({ title = "^Omacam" }, { suppress_event = "fullscreen maximize" })
 | `size` | Width 720. Height 1220 on a tall dock, 90% of logical `monitor_h` on a short laptop. Expressions must not contain spaces inside `min(…)`. |
 | `suppress_event` | Fullscreen and maximize are ignored. Resize by edges remains. |
 
-Size is a static map rule. `hyprctl reload`, then close and reopen Omacam.
+Size is a static map rule. `hyprctl reload`, then close and reopen CamY.
 
 Optional: Super+T on this window recentres and keeps float, while other windows still toggle tile. That is a local override of Omarchy’s Super+T, not a plugin file.
 
@@ -77,7 +77,7 @@ hl.unbind("SUPER + T")
 o.bind("SUPER + T", "Toggle window floating/tiling", function()
   local w = hl.get_active_window()
   local title = w and tostring(w.title or "") or ""
-  if title:find("^Omacam") then
+  if title:find("^CamY") then
     hl.dispatch(hl.dsp.window.float({ action = "set", window = w }))
     hl.dispatch(hl.dsp.window.center({ window = w }))
     return
@@ -91,19 +91,19 @@ end)
 Optional. The plugin never writes this file.
 
 ```lua
-o.bind("SUPER + SHIFT + C", "Omacam", "omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'")
+o.bind("SUPER + SHIFT + C", "CamY", "omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'")
 ```
 
-### Launcher — `~/.local/share/applications/omacam.desktop`
+### Launcher — `~/.local/share/applications/camy.desktop`
 
-Written by `scripts/write-desktop-entry.sh`. Exec is `omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'`. `StartupNotify=false` and `DBusActivatable=false` so the launcher does not wait on a new app-id (the window is class `org.quickshell`).
+Written by `scripts/write-desktop-entry.sh`. Exec is `omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'`. `StartupNotify=false` and `DBusActivatable=false` so the launcher does not wait on a new app-id (the window is class `org.quickshell`).
 
 ### Agent skill
 
 | Copy from | Copy to |
 | --- | --- |
-| `plugins/io.github.t-zero-dev.omacam/skills/yolocam/SKILL.md` | `~/.grok/skills/omacam/SKILL.md` |
-| same | `~/.agents/skills/omacam/SKILL.md` |
+| `plugins/io.github.t-zero-dev.camy/skills/yolocam/SKILL.md` | `~/.grok/skills/camy/SKILL.md` |
+| same | `~/.agents/skills/camy/SKILL.md` |
 
 The plugin does not install these copies itself.
 
@@ -131,7 +131,7 @@ SET of a named parameter persists on the body (ISO, white balance, HDMI format, 
 
 | Variable | Value |
 | --- | --- |
-| `CARGO_TARGET_DIR` | `/tmp/omacam-target` (or any path **outside** the plugin folder) |
+| `CARGO_TARGET_DIR` | `/tmp/camy-target` (or any path **outside** the plugin folder) |
 | `PATH` | include `~/.cargo/bin` |
 
 ## What the plugin will not write
@@ -139,4 +139,4 @@ SET of a named parameter persists on the body (ISO, white balance, HDMI format, 
 - `~/.config/hypr/bindings.lua`
 - `~/.config/hypr/hyprland.lua`
 - `~/.config/omarchy/shell.json` except through `omarchy plugin add/remove`
-- `~/.config/omacam/`
+- `~/.config/camy/`

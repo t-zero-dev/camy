@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.t-zero-dev.omacam",
-  "name": "Omacam",
+  "id": "io.github.t-zero-dev.camy",
+  "name": "CamY",
   "version": "0.4.0",
   "author": "t-zero-dev",
   "license": "MIT",

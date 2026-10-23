@@ -4,12 +4,12 @@ The QML panel hot-reloads on save. The helper does not.
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
-export CARGO_TARGET_DIR=/tmp/omacam-target
+export CARGO_TARGET_DIR=/tmp/camy-target
 cd helper
 cargo test
 cargo clippy --all-targets -- -D clippy::all
 cargo build --release
-cp /tmp/omacam-target/release/yolocam ../bin/yolocam.new
+cp /tmp/camy-target/release/yolocam ../bin/yolocam.new
 mv -f ../bin/yolocam.new ../bin/yolocam
 omarchy plugin validate ..
 omarchy restart shell

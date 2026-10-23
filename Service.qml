@@ -385,7 +385,7 @@ Item {
   }
 
   IpcHandler {
-    target: "omacam"
+    target: "camy"
     function refresh(): string { root.refresh(); return "ok" }
     function iso(v: string): string { root.setParam("iso", v); return "ok" }
     function shutter(v: string): string { root.setParam("shutter-us", v); return "ok" }

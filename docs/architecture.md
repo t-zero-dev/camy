@@ -20,9 +20,9 @@ Omarchy shell
 
 | Path | Role |
 |---|---|
-| `manifest.json` | Omarchy plugin id `io.github.t-zero-dev.omacam`, service + summoned panel |
+| `manifest.json` | Omarchy plugin id `io.github.t-zero-dev.camy`, service + summoned panel |
 | `Service.qml` | Long-lived `Process` running `watch`; applies events into panel state |
-| `Panel.qml` | Summoned FloatingWindow titled Omacam |
+| `Panel.qml` | Summoned FloatingWindow titled CamY |
 | `Model.js` | Shared labels, zoom/EV/shutter formatting |
 | `bin/yolocam` | Release helper |
 | `helper/` | Rust crate (MIT) |

@@ -1,29 +1,29 @@
 ---
-name: omacam
+name: camy
 description: >
   Configure a YoloLiv YoloCam S7 or S3 (ISO, shutter, zoom, focus mode, exposure)
-  from natural language via the unofficial Omacam Omarchy plugin. Use when the
-  user says omacam, yolocam, YoloCam, camera brighter, darker, zoom in, zoom out,
+  from natural language via the unofficial CamY Omarchy plugin. Use when the
+  user says camy, CamY, yolocam, YoloCam, camera brighter, darker, zoom in, zoom out,
   autofocus, AF-C, AF-S, face detect, or asks to change camera exposure. Use when
-  they run /omacam or /yolocam.
+  they run /camy or /yolocam.
 ---
 
-# Omacam
+# CamY
 
 Talk to the **running watch** only. The Omarchy service owns TCP 12345.
 
 ```bash
-PLUGIN="$HOME/.config/omarchy/plugins/io.github.t-zero-dev.omacam"
+PLUGIN="$HOME/.config/omarchy/plugins/io.github.t-zero-dev.camy"
 BIN="$PLUGIN/bin/yolocam"
 ```
 
 ## Do
 
-- Read current values: `omarchy-shell omacam state` (JSON: `usb`, `control`, `values`)
+- Read current values: `omarchy-shell camy state` (JSON: `usb`, `control`, `values`)
 - Change a parameter: `$BIN ctl set <name> <value>`
-- Open the window: `omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'`
+- Open the window: `omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'`
 
-If `ctl` says `watch not running`, the plugin service is not enabled. Tell the user to enable Omacam; do not open a second TCP client.
+If `ctl` says `watch not running`, the plugin service is not enabled. Tell the user to enable CamY; do not open a second TCP client.
 
 ## Do not
 
@@ -43,7 +43,7 @@ If `ctl` says `watch not running`, the plugin service is not enabled. Tell the u
 
 ## Relative requests
 
-1. Run `omarchy-shell omacam state` and parse `values`.
+1. Run `omarchy-shell camy state` and parse `values`.
 2. If `usb` is false, say the camera is unplugged.
 3. If `control` is false, say USB is up but control is down; do not recover.
 4. Compute the new value, clamp to the range, then `ctl set`.

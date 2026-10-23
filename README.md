@@ -1,8 +1,8 @@
-# Omacam
+# CamY
 
 Unofficial Omarchy panel for [YoloLiv](https://www.yololiv.com/) YoloCam **S7** and **S3** — the way Compose does on Windows and Mac.
 
-Omacam is not affiliated with, endorsed by, or sponsored by YoloLiv Inc. YoloCam, YoloLiv, and Compose are trademarks of their owners.
+CamY is not affiliated with, endorsed by, or sponsored by YoloLiv Inc. YoloCam, YoloLiv, and Compose are trademarks of their owners.
 
 A summoned window: live preview on top, two-column setting cards below, drawn in your Omarchy theme. Settings stay on the camera. This plugin is the remote.
 
@@ -15,59 +15,59 @@ Out of scope: firmware flashing, CLUT colour-wheel upload, YoloLiv remote assist
 Omarchy 4. Needs [Rust](https://rustup.rs/) to build the helper once. Plugins run unsandboxed inside `omarchy-shell`; read the code before you enable it.
 
 ```sh
-omarchy plugin add https://github.com/t-zero-dev/omacam.git --enable
+omarchy plugin add https://github.com/t-zero-dev/camy.git --enable
 ```
 
-That clones into `~/.config/omarchy/plugins/io.github.t-zero-dev.omacam` and enables the **service** (USB + control) and the **window**. Open it from **Apps → Omacam**.
+That clones into `~/.config/omarchy/plugins/io.github.t-zero-dev.camy` and enables the **service** (USB + control) and the **window**. Open it from **Apps → CamY**.
 
 Then build the helper. Cargo’s `target/` must stay **outside** the plugin tree — `omarchy plugin validate` rejects symlinks:
 
 ```sh
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
 export PATH="$HOME/.cargo/bin:$PATH"
-export CARGO_TARGET_DIR=/tmp/omacam-target
+export CARGO_TARGET_DIR=/tmp/camy-target
 cd "$PLUGIN/helper"
 cargo build --release
-cp /tmp/omacam-target/release/yolocam "$PLUGIN/bin/yolocam.new"
+cp /tmp/camy-target/release/yolocam "$PLUGIN/bin/yolocam.new"
 mv -f "$PLUGIN/bin/yolocam.new" "$PLUGIN/bin/yolocam"
 omarchy restart shell
 ```
 
 The helper binary is still named `yolocam`. Do not `cp` onto a running copy (`ETXTBSY`). Use `yolocam.new` then `mv -f`.
 
-Optional: list Omacam in the Omarchy menu:
+Optional: list CamY in the Omarchy menu:
 
 ```sh
-bash ~/.config/omarchy/plugins/io.github.t-zero-dev.omacam/scripts/write-desktop-entry.sh
+bash ~/.config/omarchy/plugins/io.github.t-zero-dev.camy/scripts/write-desktop-entry.sh
 ```
 
 Optional: a Hyprland key. Add one line to `~/.config/hypr/bindings.lua`. This plugin never writes that file. Example, Super+Shift+C:
 
 ```lua
-o.bind("SUPER + SHIFT + C", "Omacam", "omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'")
+o.bind("SUPER + SHIFT + C", "CamY", "omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'")
 ```
 
 Recommended: keep the window floating, centred, and right-sized as you switch between laptop and dock. Add this to `~/.config/hypr/hyprland.lua`. This plugin never writes that file either:
 
 ```lua
-o.window({ title = "^Omacam" }, { float = true })
-o.window({ title = "^Omacam" }, { center = true })
-o.window({ title = "^Omacam" }, { size = "720 min(1220, monitor_h*0.90)" })
-o.window({ title = "^Omacam" }, { suppress_event = "fullscreen maximize" })
+o.window({ title = "^CamY" }, { float = true })
+o.window({ title = "^CamY" }, { center = true })
+o.window({ title = "^CamY" }, { size = "720 min(1220, monitor_h*0.90)" })
+o.window({ title = "^CamY" }, { suppress_event = "fullscreen maximize" })
 ```
 
-`monitor_h` is logical pixels. On a 1800×1125 laptop that is 720×1012; on a 3200×1800 dock it stays 720×1220. After editing Hyprland, `hyprctl reload` then close and reopen Omacam.
+`monitor_h` is logical pixels. On a 1800×1125 laptop that is 720×1012; on a 3200×1800 dock it stays 720×1220. After editing Hyprland, `hyprctl reload` then close and reopen CamY.
 
-If Super+T tiles windows, you can leave Omacam floating by recentring it instead of toggling tile. That override lives in your Hyprland config, next to the size rule.
+If Super+T tiles windows, you can leave CamY floating by recentring it instead of toggling tile. That override lives in your Hyprland config, next to the size rule.
 
 Configs inside the plugin and outside it are listed in [docs/configuration.md](docs/configuration.md).
 
 ## First run
 
-Plug the camera with the original USB 3 **data** cable (HDMI-only is not a control path). Open **Apps → Omacam**, or:
+Plug the camera with the original USB 3 **data** cable (HDMI-only is not a control path). Open **Apps → CamY**, or:
 
 ```sh
-omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'
+omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'
 ```
 
 The glyph is an outline camera until USB shows up, then fills, then accented (blue for S7, cyan for S3) when the control plane is up. Click the preview pane, or press Space, for a 1280×720 preview. Click again (or Space) to stop. Preview stops when the window closes. You cannot stop the preview from the Focus tab.
@@ -131,18 +131,18 @@ On Status, Tab stays on **Refresh**. The readout cards are visible and not selec
 The service runs `yolocam watch` and **owns** TCP 12345. While the plugin is enabled, talk to that watch. A second `get` / `set` / `probe` / `status` firmware probe opens another client and can stall the camera.
 
 ```sh
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
 BIN="$PLUGIN/bin/yolocam"
 ```
 
 Read state from the shell (JSON: `usb`, `control`, `values`, `selected`, …):
 
 ```sh
-omarchy-shell omacam state
-omarchy-shell omacam iso 400
-omarchy-shell omacam zoom 66
-omarchy-shell omacam focusMode 4
-omarchy-shell omacam refresh
+omarchy-shell camy state
+omarchy-shell camy iso 400
+omarchy-shell camy zoom 66
+omarchy-shell camy focusMode 4
+omarchy-shell camy refresh
 ```
 
 Send JSON to the running watch:
@@ -163,32 +163,32 @@ $BIN ctl '{"cmd":"select","model":"s3"}'
 A skill teaches Grok (and other agents) to change ISO, zoom, and focus from speech or text. Copy it once:
 
 ```sh
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
-mkdir -p ~/.grok/skills/omacam ~/.agents/skills/omacam
-cp "$PLUGIN/skills/yolocam/SKILL.md" ~/.grok/skills/omacam/
-cp "$PLUGIN/skills/yolocam/SKILL.md" ~/.agents/skills/omacam/
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
+mkdir -p ~/.grok/skills/camy ~/.agents/skills/camy
+cp "$PLUGIN/skills/yolocam/SKILL.md" ~/.grok/skills/camy/
+cp "$PLUGIN/skills/yolocam/SKILL.md" ~/.agents/skills/camy/
 ```
 
 Then: “make the YoloCam brighter by 20%”, “zoom in a bit”, “switch to face detect”.
 
-The agent uses `omarchy-shell omacam state` and `$BIN ctl`. It must not run `yolocam get` / `set` / `status` while the service is up.
+The agent uses `omarchy-shell camy state` and `$BIN ctl`. It must not run `yolocam get` / `set` / `status` while the service is up.
 
 ## Preferences
 
-There is no `~/.config/omacam` file. Enablement lives in Omarchy’s shell config. Window size and keys live in Hyprland. Runtime sockets live under `$XDG_RUNTIME_DIR`.
+There is no `~/.config/camy` file. Enablement lives in Omarchy’s shell config. Window size and keys live in Hyprland. Runtime sockets live under `$XDG_RUNTIME_DIR`.
 
 `~/.config/omarchy/shell.json` is what turns the plugin on:
 
 ```json
 "plugins": [
-  { "id": "io.github.t-zero-dev.omacam" }
+  { "id": "io.github.t-zero-dev.camy" }
 ]
 ```
 
 The host injects that object as `settings`. One recognised key:
 
 ```json
-{ "id": "io.github.t-zero-dev.omacam", "preview": true }
+{ "id": "io.github.t-zero-dev.camy", "preview": true }
 ```
 
 `preview` defaults to `true`. `false` keeps the window and control; Space and click do not start the viewfinder.
@@ -200,7 +200,7 @@ See [docs/configuration.md](docs/configuration.md) for the Hyprland rules, the d
 ## Update
 
 ```sh
-omarchy plugin update io.github.t-zero-dev.omacam
+omarchy plugin update io.github.t-zero-dev.camy
 # rebuild helper/ if the Rust sources changed
 omarchy restart shell
 ```
@@ -209,7 +209,7 @@ Until the restart, the shell keeps what it loaded at login. Saving `Panel.qml` c
 
 ## If something is wrong
 
-If Apps → Omacam does nothing after an update, restart the shell.
+If Apps → CamY does nothing after an update, restart the shell.
 
 USB up but control down: the camera’s control process has stalled. Power-cycle data **and** power.
 
@@ -226,12 +226,12 @@ More cases (UVC busy, mixed dock, gadget as default route): [docs/troubleshootin
 ## Remove
 
 ```sh
-omarchy plugin remove io.github.t-zero-dev.omacam
-rm -f ~/.local/share/applications/omacam.desktop
-rm -rf ~/.grok/skills/omacam ~/.agents/skills/omacam
+omarchy plugin remove io.github.t-zero-dev.camy
+rm -f ~/.local/share/applications/camy.desktop
+rm -rf ~/.grok/skills/camy ~/.agents/skills/camy
 ```
 
-Then delete the `o.bind` line and the `o.window({ title = "^Omacam" }, …)` rules if you added them. The Super+T recentre override is yours to keep or drop.
+Then delete the `o.bind` line and the `o.window({ title = "^CamY" }, …)` rules if you added them. The Super+T recentre override is yours to keep or drop.
 
 ## Hardware
 
@@ -247,7 +247,7 @@ Leave the USB gadget off the default route. One TCP client per camera, 160 ms be
 
 | | |
 | --- | --- |
-| [CLI](docs/cli.md) | Helper and `omarchy-shell omacam` |
+| [CLI](docs/cli.md) | Helper and `omarchy-shell camy` |
 | [Configuration](docs/configuration.md) | Plugin, shell.json, Hyprland, runtime |
 | [Protocol](docs/protocol.md) | Yunxi control channel |
 | [Architecture](docs/architecture.md) | Plugin, helper, preview |

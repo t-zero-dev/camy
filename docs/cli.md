@@ -1,26 +1,26 @@
 # Helper CLI
 
-`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The Omacam service runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
+`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The CamY service runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
 
-Use `yolocam ctl` or `omarchy-shell omacam …` against a running watch. Close the window / stop the service before a second TCP client.
+Use `yolocam ctl` or `omarchy-shell camy …` against a running watch. Close the window / stop the service before a second TCP client.
 
 ```bash
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
 BIN="$PLUGIN/bin/yolocam"
 $BIN help
 ```
 
 ## Shell IPC
 
-The service registers Quickshell IPC target `omacam`. These talk to watch through the panel service, not a second TCP client.
+The service registers Quickshell IPC target `camy`. These talk to watch through the panel service, not a second TCP client.
 
 ```bash
-omarchy-shell omacam state
-omarchy-shell omacam iso 400
-omarchy-shell omacam shutter 16666
-omarchy-shell omacam zoom 66
-omarchy-shell omacam focusMode 4
-omarchy-shell omacam refresh
+omarchy-shell camy state
+omarchy-shell camy iso 400
+omarchy-shell camy shutter 16666
+omarchy-shell camy zoom 66
+omarchy-shell camy focusMode 4
+omarchy-shell camy refresh
 ```
 
 `state` returns JSON: `usb`, `control`, `glyph`, `selected`, `cameras`, `serial`, `firmware`, `preview`, `previewBusy`, `previewHolder`, `lensCovered`, `applyStatus`, `error`, `values`.
@@ -30,9 +30,9 @@ omarchy-shell omacam refresh
 Open or hide the window:
 
 ```bash
-omarchy-shell shell toggle io.github.t-zero-dev.omacam '{}'
-omarchy-shell shell summon io.github.t-zero-dev.omacam '{}'
-omarchy-shell shell hide io.github.t-zero-dev.omacam
+omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'
+omarchy-shell shell summon io.github.t-zero-dev.camy '{}'
+omarchy-shell shell hide io.github.t-zero-dev.camy
 ```
 
 ## Commands
@@ -60,7 +60,7 @@ USB, gadget NIC, control reachability, firmware (only if watch is **not** holdin
 $BIN status
 ```
 
-When `ctl.sock` exists, `status` skips the firmware GET so it does not steal 12345. Use `omarchy-shell omacam state` for live values.
+When `ctl.sock` exists, `status` skips the firmware GET so it does not steal 12345. Use `omarchy-shell camy state` for live values.
 
 ### probe
 

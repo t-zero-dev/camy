@@ -2,7 +2,7 @@
 
 ## USB present, control refused
 
-`omarchy-shell omacam state` (or the panel) shows the camera on USB but TCP `192.168.129.10:12345` or `192.168.126.10:12345` is connection-refused. `live_camera_app` on the camera has stalled.
+`omarchy-shell camy state` (or the panel) shows the camera on USB but TCP `192.168.129.10:12345` or `192.168.126.10:12345` is connection-refused. `live_camera_app` on the camera has stalled.
 
 `yolocam recover` is parked and must not be used. Unplug data **and** power, then plug both back.
 
@@ -45,12 +45,12 @@ Only named parameters are SET. CID 55, 58, and 29 are not in that table; writing
 ## Build / enable
 
 ```bash
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.omacam
-export CARGO_TARGET_DIR=/tmp/omacam-target
+PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
+export CARGO_TARGET_DIR=/tmp/camy-target
 cd "$PLUGIN/helper"
 cargo test
 cargo build --release
-cp /tmp/omacam-target/release/yolocam "$PLUGIN/bin/yolocam.new"
+cp /tmp/camy-target/release/yolocam "$PLUGIN/bin/yolocam.new"
 mv -f "$PLUGIN/bin/yolocam.new" "$PLUGIN/bin/yolocam"
 omarchy plugin validate "$PLUGIN"
 ```
