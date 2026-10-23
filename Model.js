@@ -26,7 +26,23 @@ function clip(s, n) {
 
 function plain(s, n) {
   s = clip(s, n === undefined || n === null ? MAX_LABEL : n)
-  return s.replace(/[<>]/g, "")
+  s = s.replace(/[<>]/g, "")
+  // OSC/DCS/PM/APC first (OmaPlayer marketplace #4395), then CSI, then leftover ESC.
+  s = s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
+  s = s.replace(/\x1b[PX^_][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
+  s = s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+  s = s.replace(/\x1b./g, "")
+  var out = ""
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c < 32 || c === 127 || (c >= 0x80 && c <= 0x9f)) continue
+    if (c === 0x061c || c === 0x200e || c === 0x200f || c === 0xfeff) continue
+    if (c >= 0x200b && c <= 0x200d) continue
+    if (c >= 0x202a && c <= 0x202e) continue
+    if (c >= 0x2066 && c <= 0x2069) continue
+    out += s.charAt(i)
+  }
+  return out
 }
 
 function parseLine(text) {
@@ -42,9 +58,21 @@ function previewFileUrl(path, seq) {
   if (path.indexOf("..") !== -1) return ""
   if (path.indexOf("://") !== -1) return ""
   if (path.indexOf("?") !== -1 || path.indexOf("#") !== -1) return ""
+  if (path.indexOf("/tmp/") === 0 || path === "/tmp") return ""
+  if (path.indexOf("/var/tmp/") === 0 || path.indexOf("/dev/shm/") === 0) return ""
   if (!/\/preview-[ab]\.jpg$/.test(path)) return ""
-  if (path.indexOf("/yolocam/") === -1 && !/\/yolocam-[0-9]+\//.test(path)) return ""
+  if (path.indexOf("/yolocam/") === -1) return ""
   return "file://" + path + "?" + seq
+}
+
+function safeIp(s) {
+  s = plain(s, 64)
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s) ? s : ""
+}
+
+function safeVideo(s) {
+  s = plain(s, 64)
+  return /^\/dev\/video[0-9]+$/.test(s) ? s : ""
 }
 
 function shutterLabel(us) {

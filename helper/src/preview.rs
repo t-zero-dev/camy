@@ -160,9 +160,13 @@ impl Preview {
         };
         wipe_preview_files(&dir);
         settle_uvc();
+        if !is_v4l_capture(device) {
+            return Err(Error::Invalid(format!("refusing device {device}")));
+        }
         let capture = File::options()
             .read(true)
             .write(true)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(device)
             .map_err(|e| {
                 if e.raw_os_error() == Some(libc::EBUSY) {
@@ -212,20 +216,31 @@ impl Drop for Preview {
 pub fn runtime_dir() -> PathBuf {
     let uid = current_uid();
     let xdg = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
-    let tmp = std::env::var_os("TMPDIR").map(PathBuf::from);
-    let chosen = choose_runtime_dir(xdg.as_deref(), tmp.as_deref(), uid);
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state"))
+        });
+    let chosen = choose_runtime_dir(xdg.as_deref(), state.as_deref(), uid);
     if let Some(parent) = chosen.parent() {
-        if !parent_is_safe(parent, uid) {
-            warn_runtime_fallback();
-            return tmp_fallback(None, uid);
+        if parent_is_safe(parent, uid) {
+            if !xdg
+                .as_ref()
+                .is_some_and(|p| p.is_absolute() && chosen.starts_with(p))
+            {
+                warn_runtime_fallback();
+            }
+            return chosen;
         }
     }
-    if !xdg
-        .as_ref()
-        .is_some_and(|p| p.is_absolute() && chosen.starts_with(p))
-    {
-        warn_runtime_fallback();
+    if let Some(state) = state.as_ref().filter(|p| p.is_absolute()) {
+        let alt = state.join("yolocam");
+        if parent_is_safe(state, uid) {
+            warn_runtime_fallback();
+            return alt;
+        }
     }
+    warn_runtime_fallback();
     chosen
 }
 
@@ -352,31 +367,42 @@ pub fn restrict_mode(path: &Path, mode: u32) -> Result<()> {
         .map_err(|e| Error::io_ctx(e, format!("chmod {}", path.display())))
 }
 
-pub(crate) fn choose_runtime_dir(xdg: Option<&Path>, tmpdir: Option<&Path>, uid: u32) -> PathBuf {
+fn is_shared_tmp(p: &Path) -> bool {
+    p.starts_with("/tmp") || p.starts_with("/var/tmp") || p.starts_with("/dev/shm")
+}
+
+pub(crate) fn choose_runtime_dir(xdg: Option<&Path>, state: Option<&Path>, uid: u32) -> PathBuf {
     if let Some(p) = xdg {
-        if p.is_absolute() {
+        if p.is_absolute() && !is_shared_tmp(p) {
             return p.join("yolocam");
         }
     }
-    tmp_fallback(tmpdir, uid)
-}
-
-fn tmp_fallback(tmpdir: Option<&Path>, uid: u32) -> PathBuf {
-    let tmp = tmpdir
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| Path::new("/tmp"));
-    tmp.join(format!("yolocam-{uid}"))
-}
-
-/// Parent of the runtime dir must be ours, or root-owned and either
-/// not group/world-writable or sticky (`/tmp` 1777).
-pub(crate) fn parent_mode_is_safe(owner: u32, mode: u32, uid: u32) -> bool {
-    let sticky = mode & 0o1000 != 0;
-    let foreign_write = mode & 0o022 != 0;
-    if owner == uid {
-        return !foreign_write || sticky;
+    if let Some(p) = state {
+        if p.is_absolute() && !is_shared_tmp(p) {
+            return p.join("yolocam");
+        }
     }
-    owner == 0 && (!foreign_write || sticky)
+    PathBuf::from(format!("/run/user/{uid}/yolocam"))
+}
+
+/// V4L2 capture nodes only. USB names must not become arbitrary paths
+/// (Omarchy #8129 class: do not execute or open attacker-shaped device names).
+pub fn is_v4l_capture(path: &str) -> bool {
+    let rest = match path.strip_prefix("/dev/video") {
+        Some(r) => r,
+        None => return false,
+    };
+    !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Parent of the runtime dir must be ours or root-owned, and must not
+/// be group/world-writable. Sticky `/tmp` (1777) is not a safe parent
+/// (Omarchy #7904 / #11595).
+pub(crate) fn parent_mode_is_safe(owner: u32, mode: u32, uid: u32) -> bool {
+    if mode & 0o022 != 0 {
+        return false;
+    }
+    owner == uid || owner == 0
 }
 
 fn parent_is_safe(parent: &Path, uid: u32) -> bool {
@@ -706,14 +732,41 @@ mod tests {
 
     #[test]
     fn rejects_relative_xdg() {
-        let p = choose_runtime_dir(Some(Path::new("relative")), Some(Path::new("/var/tmp")), 42);
-        assert_eq!(p, PathBuf::from("/var/tmp/yolocam-42"));
+        let p = choose_runtime_dir(
+            Some(Path::new("relative")),
+            Some(Path::new("/home/u/.local/state")),
+            42,
+        );
+        assert_eq!(p, PathBuf::from("/home/u/.local/state/yolocam"));
     }
 
     #[test]
     fn fallback_without_xdg() {
         let p = choose_runtime_dir(None, None, 7);
-        assert_eq!(p, PathBuf::from("/tmp/yolocam-7"));
+        assert_eq!(p, PathBuf::from("/run/user/7/yolocam"));
+    }
+
+    #[test]
+    fn rejects_tmp_xdg() {
+        let p = choose_runtime_dir(
+            Some(Path::new("/tmp")),
+            Some(Path::new("/var/tmp")),
+            1000,
+        );
+        assert_eq!(p, PathBuf::from("/run/user/1000/yolocam"));
+        let p = choose_runtime_dir(Some(Path::new("/dev/shm/run")), None, 9);
+        assert_eq!(p, PathBuf::from("/run/user/9/yolocam"));
+    }
+
+    #[test]
+    fn v4l_capture_is_video_node_only() {
+        assert!(super::is_v4l_capture("/dev/video0"));
+        assert!(super::is_v4l_capture("/dev/video34"));
+        assert!(!super::is_v4l_capture("/dev/video"));
+        assert!(!super::is_v4l_capture("/dev/sda"));
+        assert!(!super::is_v4l_capture("/dev/video0/../sda"));
+        assert!(!super::is_v4l_capture("/tmp/video0"));
+        assert!(!super::is_v4l_capture("/dev/video0;id"));
     }
 
     #[test]
@@ -727,11 +780,11 @@ mod tests {
     }
 
     #[test]
-    fn parent_mode_accepts_tmp_and_user_0700() {
-        assert!(super::parent_mode_is_safe(0, 0o1777, 1000));
+    fn parent_mode_rejects_world_writable() {
+        assert!(!super::parent_mode_is_safe(0, 0o1777, 1000));
         assert!(super::parent_mode_is_safe(1000, 0o700, 1000));
         assert!(super::parent_mode_is_safe(0, 0o755, 1000));
-        assert!(!super::parent_mode_is_safe(1001, 0o777, 1000));
+        assert!(!super::parent_mode_is_safe(1001, 0o755, 1000));
         assert!(!super::parent_mode_is_safe(1000, 0o777, 1000));
     }
 
@@ -745,12 +798,19 @@ mod tests {
 
     #[test]
     fn ensure_private_dir_owns_created_dir() {
-        let dir = std::env::temp_dir().join(format!("yolocam-priv-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let sandbox = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(std::env::temp_dir);
+        let outer = sandbox.join(format!("yolocam-priv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        std::fs::create_dir_all(&outer).unwrap();
+        restrict_mode(&outer, 0o700).unwrap();
+        let dir = outer.join("inner");
         super::ensure_private_dir(&dir).unwrap();
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outer);
     }
 
     #[test]

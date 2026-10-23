@@ -13,7 +13,7 @@
 
 mod watch;
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use yolocam::client::{BlockingClient, Client};
@@ -384,7 +384,7 @@ fn cmd_preview(args: &[String]) -> Result<()> {
 fn ctrlc_stub(tx: std::sync::mpsc::Sender<()>) {
     std::thread::spawn(move || {
         let mut dummy = String::new();
-        let _ = io::stdin().read_line(&mut dummy);
+        let _ = io::Read::take(io::stdin(), 8 * 1024 + 1).read_to_string(&mut dummy);
         let _ = tx.send(());
     });
 }

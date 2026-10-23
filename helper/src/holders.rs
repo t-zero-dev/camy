@@ -121,8 +121,14 @@ fn holds_device(fd_dir: &Path, device: &str, want: u64) -> bool {
 }
 
 fn proc_comm(pid: u32) -> String {
+    let mut f = match fs::File::open(format!("/proc/{pid}/comm")) {
+        Ok(f) => f,
+        Err(_) => return String::new(),
+    };
+    let mut buf = [0u8; 64];
+    let n = f.read(&mut buf).unwrap_or(0);
     clip(
-        &fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default(),
+        &String::from_utf8_lossy(&buf[..n]),
         MAX_COMM,
     )
 }
@@ -198,7 +204,7 @@ fn related_text(pid: u32, windows: &[HyprWin]) -> String {
 }
 
 fn hypr_windows() -> Vec<HyprWin> {
-    let mut child = match Command::new("hyprctl")
+    let mut child = match Command::new("/usr/bin/hyprctl")
         .args(["clients", "-j"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -305,9 +311,24 @@ pub(crate) fn classify(comm: &str, cmdline: &str, extra: &str) -> (String, &'sta
         return ("Signal".into(), "other");
     }
     if !comm.is_empty() {
-        return (clip(comm, MAX_COMM), "other");
+        return (printable(&clip(comm, MAX_COMM)), "other");
     }
     ("another app".into(), "other")
+}
+
+fn printable(s: &str) -> String {
+    s.chars()
+        .filter(|c| {
+            let u = *c as u32;
+            !c.is_control()
+                && u != 0x7f
+                && u != 0x061c
+                && u != 0xfeff
+                && !(0x200b..=0x200f).contains(&u)
+                && !(0x202a..=0x202e).contains(&u)
+                && !(0x2066..=0x2069).contains(&u)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -359,6 +380,13 @@ mod tests {
         let (name, kind) = classify("obs", "/usr/bin/obs", "");
         assert_eq!(name, "OBS Studio");
         assert_eq!(kind, "obs");
+    }
+
+    #[test]
+    fn unknown_comm_drops_bidi() {
+        let (name, kind) = classify("cam\u{202e}evil", "", "");
+        assert_eq!(name, "camevil");
+        assert_eq!(kind, "other");
     }
 
     #[test]

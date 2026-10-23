@@ -70,8 +70,8 @@ Item {
           usb: c.usb === true,
           control: c.control === true,
           product: Model.plain(c.product || "", 80),
-          video: Model.clip(c.video || "", 64),
-          cameraIp: Model.clip(c.cameraIp || "", 64)
+          video: Model.safeVideo(c.video || ""),
+          cameraIp: Model.safeIp(c.cameraIp || "")
         })
       }
       cameras = cams
@@ -105,8 +105,8 @@ Item {
       usb = ev.usb === true
       serial = Model.plain(ev.serial || "", 64)
       product = Model.plain(ev.product || "", 80)
-      cameraIp = Model.clip(ev.cameraIp || "", 64)
-      videoDevice = Model.clip(ev.video || "", 64)
+      cameraIp = Model.safeIp(ev.cameraIp || "")
+      videoDevice = Model.safeVideo(ev.video || "")
       if (glyphCode === 0 && usb) {
         var m = String(ev.model || selectedModel || "s7")
         glyphCode = m === "s3" ? 3 : 7
@@ -212,7 +212,8 @@ Item {
       return
     }
     if (event === "focus-box") {
-      focusRects = Array.isArray(ev.rects) ? ev.rects : []
+      var boxes = Array.isArray(ev.rects) ? ev.rects : []
+      focusRects = boxes.slice(0, 16)
       return
     }
     if (event === "focus-area") {
@@ -312,17 +313,23 @@ Item {
 
   function setParam(name, value) {
     if (!usb) return
-    name = Model.clip(name, 32)
-    value = Model.clip(value, 32)
-    if (/[<>]/.test(String(value)) || /[<>]/.test(String(name))) {
+    name = Model.plain(name, 32)
+    value = Model.plain(value, 32)
+    if (!/^[a-z][a-z0-9-]*$/.test(name) || value === "") {
+      lastError = "invalid value"
+      return
+    }
+    var numeric = /^-?\d+(\.\d+)?$/.test(value)
+    var token = /^(on|off|auto|manual|line|mic|face|af-s|af-c)$/i.test(value)
+    if (!numeric && !token) {
       lastError = "invalid value"
       return
     }
     var next = Object.assign({}, values)
-    next[name] = value
+    next[name] = numeric ? Number(value) : value
     values = next
     var p = Object.assign({}, pending)
-    p[name] = value
+    p[name] = next[name]
     pending = p
     applyStatus = "Applying " + name + "…"
     send({ cmd: "set", name: name, value: String(value), model: selectedModel })

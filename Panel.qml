@@ -1650,6 +1650,7 @@ Item {
         horizontalAlignment: TextInput.AlignHCenter
         selectByMouse: true
         clip: true
+        maximumLength: 16
         text: srow.formatLive(Number(root.val(srow.name, srow.minimum)))
         onEditingFinished: {
           var n = srow.parseLive(text)
@@ -1980,6 +1981,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             horizontalAlignment: TextInput.AlignHCenter
+            maximumLength: 16
             text: Model.zoomMult(root.val("zoom", 50)).toFixed(1)
             onEditingFinished: {
               var n = Number(text)
