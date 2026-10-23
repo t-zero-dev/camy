@@ -5,11 +5,11 @@
 //! (tmpfs — RAM, not a disk). Qt still decodes for display. We decode luma
 //! on each displayed frame only to decide "lens covered" (~200 ms of dark).
 
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsRawFd, BorrowedFd};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -35,6 +35,7 @@ const VIDIOC_STREAMOFF: u64 = 0x4004_5613;
 
 const COVER_STREAK: u8 = 3;
 const UVC_SETTLE_MS: u64 = 450;
+const MAX_JPEG: usize = 2 * 1024 * 1024;
 static LAST_STOP_MS: AtomicU64 = AtomicU64::new(0);
 
 fn now_ms() -> u64 {
@@ -179,7 +180,7 @@ impl Preview {
             .name("yolocam-preview".into())
             .spawn(move || {
                 if let Err(e) = run(fd, width, height, &dir2, &stop2) {
-                    let _ = std::fs::write(dir2.join("error"), e.to_string().as_bytes());
+                    let _ = write_private(dir2.join("error"), e.to_string().as_bytes());
                 }
             })
             .map_err(|e| Error::io_ctx(e, "preview thread"))?;
@@ -209,9 +210,16 @@ impl Drop for Preview {
 }
 
 pub fn runtime_dir() -> PathBuf {
+    let uid = current_uid();
     let xdg = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     let tmp = std::env::var_os("TMPDIR").map(PathBuf::from);
-    let chosen = choose_runtime_dir(xdg.as_deref(), tmp.as_deref(), current_uid());
+    let chosen = choose_runtime_dir(xdg.as_deref(), tmp.as_deref(), uid);
+    if let Some(parent) = chosen.parent() {
+        if !parent_is_safe(parent, uid) {
+            warn_runtime_fallback();
+            return tmp_fallback(None, uid);
+        }
+    }
     if !xdg
         .as_ref()
         .is_some_and(|p| p.is_absolute() && chosen.starts_with(p))
@@ -224,25 +232,95 @@ pub fn runtime_dir() -> PathBuf {
 /// Create `$XDG_RUNTIME_DIR/yolocam` (or a 0700 fallback) and restrict it.
 pub fn ensure_runtime_dir() -> Result<PathBuf> {
     let dir = runtime_dir();
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|e| Error::io_ctx(e, "mkdir"))?;
-    restrict_mode(&dir, 0o700)?;
+    ensure_private_dir(&dir)?;
     Ok(dir)
 }
 
 /// JPEG ping-pong for one camera: `$XDG_RUNTIME_DIR/yolocam/<serial>/`.
 pub fn ensure_camera_dir(serial: &str) -> Result<PathBuf> {
     let dir = runtime_dir().join(crate::discover::sanitize_id(serial));
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|e| Error::io_ctx(e, "mkdir"))?;
-    restrict_mode(&dir, 0o700)?;
+    ensure_private_dir(&dir)?;
     Ok(dir)
+}
+
+/// Refuse to use a directory another uid could replace or read.
+pub(crate) fn ensure_private_dir(dir: &Path) -> Result<PathBuf> {
+    let uid = current_uid();
+    if let Some(parent) = dir.parent() {
+        if !parent_is_safe(parent, uid) {
+            return Err(Error::io(format!(
+                "{} parent is not a private directory",
+                dir.display()
+            )));
+        }
+    }
+    if dir.exists() {
+        let meta =
+            fs::metadata(dir).map_err(|e| Error::io_ctx(e, format!("stat {}", dir.display())))?;
+        if !meta.is_dir() {
+            return Err(Error::io(format!("{} is not a directory", dir.display())));
+        }
+        if meta.uid() != uid {
+            return Err(Error::io(format!(
+                "{} is not owned by the current user",
+                dir.display()
+            )));
+        }
+    } else {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| Error::io_ctx(e, "mkdir"))?;
+        let meta =
+            fs::metadata(dir).map_err(|e| Error::io_ctx(e, format!("stat {}", dir.display())))?;
+        if meta.uid() != uid {
+            return Err(Error::io(format!(
+                "{} ownership mismatch after create",
+                dir.display()
+            )));
+        }
+    }
+    restrict_mode(dir, 0o700)?;
+    Ok(dir.to_path_buf())
+}
+
+/// Tighten leftover preview files from an older helper (0644 JPEGs).
+pub fn harden_runtime_tree() -> Result<()> {
+    let root = ensure_runtime_dir()?;
+    if let Ok(rd) = fs::read_dir(&root) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if p.is_dir() {
+                let _ = restrict_mode(&p, 0o700);
+                if let Ok(inner) = fs::read_dir(&p) {
+                    for f in inner.flatten() {
+                        let fp = f.path();
+                        let name = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if name.starts_with("preview-") && name.ends_with(".jpg")
+                            || name == "covered"
+                            || name == "slot"
+                            || name == "error"
+                        {
+                            let _ = restrict_mode(&fp, 0o600);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_private(path: PathBuf, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)?;
+    f.write_all(bytes)
 }
 
 fn wipe_preview_files(dir: &Path) {
@@ -263,7 +341,10 @@ pub fn restrict_mode(path: &Path, mode: u32) -> Result<()> {
     let meta =
         fs::metadata(path).map_err(|e| Error::io_ctx(e, format!("stat {}", path.display())))?;
     if meta.uid() != current_uid() {
-        return Ok(());
+        return Err(Error::io(format!(
+            "{} is not owned by the current user",
+            path.display()
+        )));
     }
     let mut perms = meta.permissions();
     perms.set_mode(mode);
@@ -277,10 +358,32 @@ pub(crate) fn choose_runtime_dir(xdg: Option<&Path>, tmpdir: Option<&Path>, uid:
             return p.join("yolocam");
         }
     }
+    tmp_fallback(tmpdir, uid)
+}
+
+fn tmp_fallback(tmpdir: Option<&Path>, uid: u32) -> PathBuf {
     let tmp = tmpdir
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| Path::new("/tmp"));
     tmp.join(format!("yolocam-{uid}"))
+}
+
+/// Parent of the runtime dir must be ours, or root-owned and either
+/// not group/world-writable or sticky (`/tmp` 1777).
+pub(crate) fn parent_mode_is_safe(owner: u32, mode: u32, uid: u32) -> bool {
+    let sticky = mode & 0o1000 != 0;
+    let foreign_write = mode & 0o022 != 0;
+    if owner == uid {
+        return !foreign_write || sticky;
+    }
+    owner == 0 && (!foreign_write || sticky)
+}
+
+fn parent_is_safe(parent: &Path, uid: u32) -> bool {
+    let Ok(meta) = fs::metadata(parent) else {
+        return false;
+    };
+    parent_mode_is_safe(meta.uid(), meta.permissions().mode(), uid)
 }
 
 fn current_uid() -> u32 {
@@ -394,7 +497,7 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
     let mut retried = false;
     let mut deadline = Instant::now() + Duration::from_secs(5);
     let wait = PollTimeout::try_from(Duration::from_millis(200)).unwrap_or(PollTimeout::ZERO);
-    let _ = std::fs::write(dir.join("covered"), b"0");
+    let _ = write_private(dir.join("covered"), b"0");
     while !stop.load(Ordering::Relaxed) {
         let mut pfds = [PollFd::new(file, PollFlags::POLLIN)];
         let _ = poll(&mut pfds, wait);
@@ -426,6 +529,10 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
             let raw =
                 unsafe { std::slice::from_raw_parts(maps[idx].ptr.as_ptr().cast::<u8>(), used) };
             let jpeg = trim_jpeg(raw);
+            if jpeg.len() > MAX_JPEG {
+                let _ = ioctl(fd, VIDIOC_QBUF, &mut buf);
+                continue;
+            }
             let name = if slot == 0 {
                 "preview-a.jpg"
             } else {
@@ -433,9 +540,17 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
             };
             let tmp = dir.join(format!("{name}.tmp"));
             let dest = dir.join(name);
-            if let Ok(mut f) = File::create(&tmp) {
+            if let Ok(mut f) = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&tmp)
+            {
                 if f.write_all(jpeg).is_ok() {
                     let _ = std::fs::rename(&tmp, &dest);
+                    let _ = restrict_mode(&dest, 0o600);
                     let dark = frame_is_covered(jpeg);
                     if dark {
                         dark_streak = dark_streak.saturating_add(1);
@@ -445,10 +560,15 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
                     let covered = dark_streak >= COVER_STREAK;
                     if covered != last_covered {
                         last_covered = covered;
-                        let _ =
-                            std::fs::write(dir.join("covered"), if covered { b"1" } else { b"0" });
+                        let _ = write_private(
+                            dir.join("covered"),
+                            if covered { b"1" } else { b"0" },
+                        );
                     }
-                    let _ = std::fs::write(dir.join("slot"), if slot == 0 { b"a" } else { b"b" });
+                    let _ = write_private(
+                        dir.join("slot"),
+                        if slot == 0 { b"a" } else { b"b" },
+                    );
                     slot ^= 1;
                     last = Instant::now();
                 }
@@ -487,7 +607,10 @@ fn release_bufs(fd: i32) {
 
 #[allow(clippy::many_single_char_names)]
 fn frame_is_covered(jpeg: &[u8]) -> bool {
-    let mut dec = zune_jpeg::JpegDecoder::new(jpeg);
+    let options = zune_jpeg::zune_core::options::DecoderOptions::default()
+        .set_max_width(1920)
+        .set_max_height(1080);
+    let mut dec = zune_jpeg::JpegDecoder::new_with_options(jpeg, options);
     let Ok(pixels) = dec.decode() else {
         return false;
     };
@@ -598,6 +721,33 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("yolocam-mode-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         restrict_mode(&dir, 0o700).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parent_mode_accepts_tmp_and_user_0700() {
+        assert!(super::parent_mode_is_safe(0, 0o1777, 1000));
+        assert!(super::parent_mode_is_safe(1000, 0o700, 1000));
+        assert!(super::parent_mode_is_safe(0, 0o755, 1000));
+        assert!(!super::parent_mode_is_safe(1001, 0o777, 1000));
+        assert!(!super::parent_mode_is_safe(1000, 0o777, 1000));
+    }
+
+    #[test]
+    fn ensure_private_dir_rejects_a_file() {
+        let path = std::env::temp_dir().join(format!("yolocam-notdir-{}", std::process::id()));
+        std::fs::write(&path, b"x").unwrap();
+        assert!(super::ensure_private_dir(&path).is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ensure_private_dir_owns_created_dir() {
+        let dir = std::env::temp_dir().join(format!("yolocam-priv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        super::ensure_private_dir(&dir).unwrap();
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
         let _ = std::fs::remove_dir_all(&dir);

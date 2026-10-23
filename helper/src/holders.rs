@@ -6,9 +6,24 @@
 //! names as Chromium unless a related window class/title says otherwise.
 
 use std::fs;
+use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+const MAX_HYPR_JSON: usize = 1_048_576;
+const MAX_COMM: usize = 64;
+const MAX_CMDLINE: usize = 4096;
+const MAX_TITLE: usize = 256;
+
+fn clip(s: &str, max: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Holder {
@@ -106,21 +121,27 @@ fn holds_device(fd_dir: &Path, device: &str, want: u64) -> bool {
 }
 
 fn proc_comm(pid: u32) -> String {
-    fs::read_to_string(format!("/proc/{pid}/comm"))
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+    clip(
+        &fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default(),
+        MAX_COMM,
+    )
 }
 
 fn proc_cmdline(pid: u32) -> String {
     fs::read(format!("/proc/{pid}/cmdline"))
         .ok()
-        .map(|b| String::from_utf8_lossy(&b).replace('\0', " "))
+        .map(|b| {
+            let s = String::from_utf8_lossy(&b[..b.len().min(MAX_CMDLINE)]).replace('\0', " ");
+            clip(&s, MAX_CMDLINE)
+        })
         .unwrap_or_default()
 }
 
 fn proc_ppid(pid: u32) -> Option<u32> {
-    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let mut f = fs::File::open(format!("/proc/{pid}/status")).ok()?;
+    let mut buf = [0u8; 4096];
+    let n = f.read(&mut buf).ok()?;
+    let status = String::from_utf8_lossy(&buf[..n]);
     status.lines().find_map(|line| {
         line.strip_prefix("PPid:")
             .and_then(|rest| rest.trim().parse().ok())
@@ -177,17 +198,25 @@ fn related_text(pid: u32, windows: &[HyprWin]) -> String {
 }
 
 fn hypr_windows() -> Vec<HyprWin> {
-    let out = Command::new("hyprctl")
+    let mut child = match Command::new("hyprctl")
         .args(["clients", "-j"])
-        .output()
-        .ok();
-    let Some(out) = out else {
-        return Vec::new();
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
     };
-    if !out.status.success() {
+    let mut buf = Vec::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        let _ = Read::take(&mut stdout, MAX_HYPR_JSON as u64 + 1).read_to_end(&mut buf);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    if buf.len() > MAX_HYPR_JSON {
         return Vec::new();
     }
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf) else {
         return Vec::new();
     };
     let Some(arr) = v.as_array() else {
@@ -200,7 +229,7 @@ fn hypr_windows() -> Vec<HyprWin> {
             for key in ["title", "class", "initialTitle", "initialClass"] {
                 if let Some(s) = c.get(key).and_then(serde_json::Value::as_str) {
                     text.push(' ');
-                    text.push_str(s);
+                    text.push_str(&clip(s, MAX_TITLE));
                 }
             }
             Some(HyprWin { pid, text })
@@ -276,7 +305,7 @@ pub(crate) fn classify(comm: &str, cmdline: &str, extra: &str) -> (String, &'sta
         return ("Signal".into(), "other");
     }
     if !comm.is_empty() {
-        return (comm.to_string(), "other");
+        return (clip(comm, MAX_COMM), "other");
     }
     ("another app".into(), "other")
 }

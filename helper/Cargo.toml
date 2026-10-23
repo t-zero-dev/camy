@@ -5,6 +5,12 @@ edition = "2021"
 license = "MIT"
 description = "YoloCam S7/S3 control helper for the Omarchy plugin"
 
+[features]
+default = []
+# Parked telnet recover. Off by default so vendor credentials are not
+# compiled into the helper the panel actually ships.
+recover = []
+
 [dependencies]
 libc = "0.2"
 nix = { version = "0.30", default-features = false, features = ["ioctl", "fs", "mman", "poll", "inotify", "net"] }

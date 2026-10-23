@@ -43,17 +43,30 @@ impl Cmd {
             "af-target" => Ok(Self::AfTarget),
             "af-area" => Ok(Self::AfArea),
             "heartbeat" => Ok(Self::Heartbeat),
-            "preview" => {
-                let on = v
-                    .get("on")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                Ok(Self::Preview { on })
-            }
+            "preview" => Ok(Self::Preview { on: json_on(v) }),
             "reconnect" => Ok(Self::Reconnect),
             _ => Err(Error::Invalid(format!("unknown cmd {cmd}"))),
         }
     }
+}
+
+fn json_on(v: &serde_json::Value) -> bool {
+    fn truthy(s: &str) -> bool {
+        matches!(s, "on" | "true" | "1" | "start")
+    }
+    if let Some(b) = v.get("on").and_then(serde_json::Value::as_bool) {
+        return b;
+    }
+    if let Some(s) = v.get("on").and_then(serde_json::Value::as_str) {
+        return truthy(s);
+    }
+    if let Some(s) = v.get("name").and_then(serde_json::Value::as_str) {
+        return truthy(s);
+    }
+    if let Some(s) = v.get("value").and_then(serde_json::Value::as_str) {
+        return truthy(s);
+    }
+    false
 }
 
 #[cfg(test)]
@@ -111,6 +124,14 @@ mod tests {
         assert_eq!(
             Cmd::parse(&json!({"cmd": "preview", "on": true})).unwrap(),
             Cmd::Preview { on: true }
+        );
+        assert_eq!(
+            Cmd::parse(&json!({"cmd": "preview", "name": "on"})).unwrap(),
+            Cmd::Preview { on: true }
+        );
+        assert_eq!(
+            Cmd::parse(&json!({"cmd": "preview", "on": "off"})).unwrap(),
+            Cmd::Preview { on: false }
         );
         assert_eq!(
             Cmd::parse(&json!({"cmd": "refresh"})).unwrap(),

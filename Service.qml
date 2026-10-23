@@ -59,9 +59,24 @@ Item {
     if (!ev || typeof ev !== "object") return
     var event = String(ev.event || "")
     if (event === "inventory") {
-      cameras = Array.isArray(ev.cameras) ? ev.cameras : []
+      var rawCams = Array.isArray(ev.cameras) ? ev.cameras : []
+      var cams = []
+      for (var ci = 0; ci < rawCams.length; ci++) {
+        var c = rawCams[ci] || {}
+        cams.push({
+          model: String(c.model) === "s3" ? "s3" : "s7",
+          serial: Model.plain(c.serial || "", 64),
+          id: Model.plain(c.id || c.serial || "", 64),
+          usb: c.usb === true,
+          control: c.control === true,
+          product: Model.plain(c.product || "", 80),
+          video: Model.clip(c.video || "", 64),
+          cameraIp: Model.clip(c.cameraIp || "", 64)
+        })
+      }
+      cameras = cams
       glyphCode = Number(ev.glyph || 0)
-      if (ev.selected) selectedModel = String(ev.selected)
+      if (ev.selected) selectedModel = String(ev.selected) === "s3" ? "s3" : "s7"
       usb = cameras.length > 0
       if (!usb) {
         connected = false
@@ -88,10 +103,10 @@ Item {
     }
     if (event === "discover") {
       usb = ev.usb === true
-      serial = String(ev.serial || "")
-      product = String(ev.product || "")
-      cameraIp = String(ev.cameraIp || "")
-      videoDevice = String(ev.video || "")
+      serial = Model.plain(ev.serial || "", 64)
+      product = Model.plain(ev.product || "", 80)
+      cameraIp = Model.clip(ev.cameraIp || "", 64)
+      videoDevice = Model.clip(ev.video || "", 64)
       if (glyphCode === 0 && usb) {
         var m = String(ev.model || selectedModel || "s7")
         glyphCode = m === "s3" ? 3 : 7
@@ -122,7 +137,7 @@ Item {
     if (event === "disconnected") {
       connected = false
       control = false
-      lastError = String(ev.error || "disconnected")
+      lastError = Model.plain(ev.error || "disconnected", Model.MAX_ERROR)
       var why = lastError.toLowerCase()
       if (why === "unplugged" || why.indexOf("not on usb") !== -1)
         usb = false
@@ -140,7 +155,7 @@ Item {
       control = true
       var name = String(ev.name || "")
       if (ev.error) {
-        lastError = String(ev.error)
+        lastError = Model.plain(ev.error, Model.MAX_ERROR)
         if (pending[name] !== undefined) {
           clearPending(name, "Camera did not confirm")
         } else if (name === "focus-target" || name === "focus-area") {
@@ -180,7 +195,7 @@ Item {
       next[name] = ev.value
       values = next
       if (name === "firmware" && ev.value && ev.value.firmware)
-        firmware = String(ev.value.firmware)
+        firmware = Model.plain(ev.value.firmware, 80)
       return
     }
     if (event === "covered") {
@@ -191,7 +206,7 @@ Item {
       previewOn = true
       previewBusy = false
       previewSeq += 1
-      previewPath = String(ev.path || "")
+      previewPath = Model.previewFileUrl(ev.path || "", 0) ? String(ev.path) : ""
       if (ev.covered === true || ev.covered === 1 || ev.covered === "1") lensCovered = true
       else if (ev.covered === false || ev.covered === 0 || ev.covered === "0") lensCovered = false
       return
@@ -208,9 +223,9 @@ Item {
     if (event === "preview") {
       previewOn = ev.on === true
       previewBusy = String(ev.error || "") === "busy"
-      previewHolder = String(ev.holder || "")
+      previewHolder = Model.plain(ev.holder || "", Model.MAX_LABEL)
       previewHolderKind = String(ev.holderKind || "")
-      if (ev.error && ev.error !== "busy") lastError = String(ev.error)
+      if (ev.error && ev.error !== "busy") lastError = Model.plain(ev.error, Model.MAX_ERROR)
       if (previewOn) {
         previewPath = ""
       }
@@ -226,15 +241,15 @@ Item {
     if (event === "preview-error") {
       previewOn = false
       previewBusy = String(ev.error || "") === "busy"
-      previewHolder = String(ev.holder || "")
+      previewHolder = Model.plain(ev.holder || "", Model.MAX_LABEL)
       previewHolderKind = String(ev.holderKind || "")
       focusRects = []
       focusArea = null
-      if (!previewBusy) lastError = String(ev.error || "preview failed")
+      if (!previewBusy) lastError = Model.plain(ev.error || "preview failed", Model.MAX_ERROR)
       return
     }
     if (event === "error") {
-      lastError = String(ev.error || "error")
+      lastError = Model.plain(ev.error || "error", Model.MAX_ERROR)
     }
   }
 
@@ -297,6 +312,12 @@ Item {
 
   function setParam(name, value) {
     if (!usb) return
+    name = Model.clip(name, 32)
+    value = Model.clip(value, 32)
+    if (/[<>]/.test(String(value)) || /[<>]/.test(String(name))) {
+      lastError = "invalid value"
+      return
+    }
     var next = Object.assign({}, values)
     next[name] = value
     values = next
@@ -354,6 +375,7 @@ Item {
   }
 
   Component.onCompleted: startWatch()
+  Component.onDestruction: stopWatch()
   onActiveChanged: active ? startWatch() : stopWatch()
 
   Process {
@@ -366,7 +388,7 @@ Item {
     stderr: SplitParser {
       onRead: function(data) {
         var text = String(data || "").trim()
-        if (text) root.lastError = text
+        if (text) root.lastError = Model.plain(text, Model.MAX_ERROR)
       }
     }
     onStarted: root.flushSendQueue()

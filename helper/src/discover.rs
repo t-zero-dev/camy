@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -311,7 +312,10 @@ pub fn usb_root_from(start: &Path) -> Option<PathBuf> {
 }
 
 fn read_trim(path: &Path) -> Option<String> {
-    fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+    let mut f = fs::File::open(path).ok()?;
+    let mut buf = [0u8; 256];
+    let n = f.read(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf[..n]).trim().to_string())
 }
 
 fn find_net_iface(usb: &Path) -> Option<String> {
@@ -371,8 +375,10 @@ pub fn sibling_ten(host: &str) -> Option<String> {
     Some(format!("{}.{}.{}.{}", oct[0], oct[1], oct[2], oct[3]))
 }
 
+pub const MAX_ID_LEN: usize = 64;
+
 pub fn sanitize_id(serial: &str) -> String {
-    let s: String = serial
+    let mut s: String = serial
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' {
@@ -381,10 +387,12 @@ pub fn sanitize_id(serial: &str) -> String {
                 '-'
             }
         })
+        .take(MAX_ID_LEN)
         .collect();
     if s.is_empty() {
         "camera".into()
     } else {
+        s.truncate(MAX_ID_LEN);
         s
     }
 }
@@ -433,7 +441,9 @@ mod tests {
     fn sanitize_id_strips_junk() {
         assert_eq!(sanitize_id("Y-CAM-25360005"), "Y-CAM-25360005");
         assert_eq!(sanitize_id("a/b:c"), "a-b-c");
+        assert_eq!(sanitize_id(".."), "--");
         assert_eq!(sanitize_id(""), "camera");
+        assert_eq!(sanitize_id(&"A".repeat(80)).len(), MAX_ID_LEN);
     }
 
     #[test]

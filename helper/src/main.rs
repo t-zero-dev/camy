@@ -43,7 +43,7 @@ fn main() {
         "aperture" => cmd_set_alias("aperture", &args[1..]),
         "watch" => watch::run(),
         "ctl" => cmd_ctl(&args[1..]),
-        "recover" => cmd_recover(),
+        "recover" => Err(Error::Invalid("recover is disabled".into())),
         "preview" => cmd_preview(&args[1..]),
         "-h" | "--help" | "help" => {
             print_help();
@@ -74,7 +74,6 @@ fn print_help() {
            set <name> <value>  write a parameter\n\
            iso|shutter|wb-temp|aperture <value>\n\
            watch               JSON-lines events on stdout; commands on stdin\n\
-           recover             restart camera control over telnet (no power-cycle)\n\
            preview start|stop  MJPEG viewfinder (panel-open only)\n"
     );
 }
@@ -394,19 +393,12 @@ fn ctl_path() -> std::path::PathBuf {
     yolocam::preview::runtime_dir().join("ctl.sock")
 }
 
-fn cmd_recover() -> Result<()> {
-    let disc = discover::discover();
-    if !disc.usb {
-        return Err(Error::Invalid("camera not on USB".into()));
-    }
-    yolocam::recover::restart_control(&disc.camera_ip, disc.port)?;
-    ok(serde_json::json!({"recovered": true, "cameraIp": disc.camera_ip, "port": disc.port}));
-    Ok(())
-}
-
 fn cmd_ctl(args: &[String]) -> Result<()> {
     let payload = if args.len() == 1 {
         args[0].clone()
+    } else if args[0] == "preview" && args.len() >= 2 {
+        let on = matches!(args[1].as_str(), "on" | "true" | "1" | "start");
+        serde_json::json!({"cmd": "preview", "on": on}).to_string()
     } else if args.len() >= 2 {
         serde_json::json!({"cmd": args[0], "name": args.get(1), "value": args.get(2)}).to_string()
     } else {
@@ -414,6 +406,9 @@ fn cmd_ctl(args: &[String]) -> Result<()> {
             "ctl '<json>' | ctl set <name> <value> | ctl preview on|off".into(),
         ));
     };
+    if payload.len() > 8 * 1024 {
+        return Err(Error::Invalid("command too long".into()));
+    }
     let sock = std::os::unix::net::UnixStream::connect(ctl_path())
         .map_err(|e| Error::io_ctx(e, "watch not running"))?;
     let mut s = sock;

@@ -423,7 +423,12 @@ fn parse_wb_offset(v: &serde_json::Value) -> Result<SetPayload> {
 }
 
 fn wb_pair(v: &serde_json::Value) -> Option<(u32, u32)> {
-    Some((json_u32(v.get("r"))?, json_u32(v.get("b"))?))
+    let r = json_u32(v.get("r"))?;
+    let b = json_u32(v.get("b"))?;
+    if r > 20 || b > 20 {
+        return None;
+    }
+    Some((r, b))
 }
 
 fn json_u32(v: Option<&serde_json::Value>) -> Option<u32> {
@@ -497,7 +502,7 @@ pub fn encode_named(param: &Param, raw: &str) -> Result<u32> {
     }
     let n: i32 = raw
         .parse()
-        .map_err(|_| Error::Invalid(format!("not a number: {raw}")))?;
+        .map_err(|_| Error::Invalid("not a number".into()))?;
     encode_value(param, n)
 }
 
@@ -643,6 +648,7 @@ mod tests {
         assert!(parse_set(p, &json!({"name": "wb-offset", "value": 10})).is_err());
         assert!(super::encode_named(p, "10").is_err());
         assert!(super::encode_value(p, 10).is_err());
+        assert!(parse_set(p, &json!({"name": "wb-offset", "r": 99, "b": 12})).is_err());
         let ok = parse_set(p, &json!({"name": "wb-offset", "r": 8, "b": 12})).unwrap();
         assert_eq!(ok, SetPayload::Wb { r: 8, b: 12 });
         let nested =
@@ -662,6 +668,17 @@ mod tests {
             parse_set(p, &json!({"cmd": "set", "name": "iso", "value": 200})).unwrap(),
             SetPayload::Int(200)
         );
+    }
+
+    #[test]
+    fn encode_named_does_not_echo_raw() {
+        let p = ParamId::Iso.spec();
+        let err = super::encode_named(p, r#"<img src="https://example.invalid/t">"#).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("not a number"));
+        assert!(!s.contains('<'));
+        assert!(!s.contains("img"));
+        assert!(!s.contains("example.invalid"));
     }
 
     #[test]

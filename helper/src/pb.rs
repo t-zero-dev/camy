@@ -334,8 +334,11 @@ fn read_u32_le(data: &[u8], i: usize) -> Result<u32> {
     Ok(u32::from_le_bytes(bytes))
 }
 
+const MAX_TEXT: usize = 512;
+
 fn utf8(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
+    let n = bytes.len().min(MAX_TEXT);
+    String::from_utf8_lossy(&bytes[..n]).into_owned()
 }
 
 fn decode_rect(data: &[u8]) -> RectF {

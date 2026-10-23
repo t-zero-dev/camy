@@ -4,11 +4,14 @@
 //! At most one S7 and one S3 session. Commands without `model`/`id` hit the
 //! selected camera (S7 if both just appeared).
 
-use std::io::{self, BufRead};
-use std::os::fd::AsFd;
-use std::os::unix::net::UnixListener;
+use std::io::{self, BufRead, Read};
+use std::os::fd::{AsFd, AsRawFd};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+const MAX_CMD_LINE: usize = 8 * 1024;
+const MAX_SLOT_FILE: usize = 64;
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use yolocam::client::Client;
@@ -152,6 +155,7 @@ pub fn run() -> Result<()> {
 impl Watch {
     fn open() -> Result<Self> {
         let _dir = yolocam::preview::ensure_runtime_dir()?;
+        let _ = yolocam::preview::harden_runtime_tree();
         let sock_path = ctl_path();
         let _ = std::fs::remove_file(&sock_path);
         let listener = UnixListener::bind(&sock_path).map_err(|e| Error::io_ctx(e, "ctl.sock"))?;
@@ -217,13 +221,17 @@ impl Watch {
             self.on_ctl();
         }
         if hits.stdin {
-            line.clear();
-            if input.read_line(line).unwrap_or(0) == 0 {
-                return false;
-            }
-            let line = line.trim();
-            if !line.is_empty() {
-                self.on_stdin(line);
+            match read_cmd_line(input, line) {
+                Ok(0) => return false,
+                Ok(_) => {
+                    let line = line.trim();
+                    if !line.is_empty() {
+                        self.on_stdin(line);
+                    }
+                }
+                Err(_) => {
+                    emit(serde_json::json!({"event":"error","error":"command too long"}));
+                }
             }
         }
         self.emit_refreshed(Model::S7);
@@ -559,14 +567,23 @@ impl Watch {
 
     fn on_ctl(&mut self) {
         if let Ok((stream, _)) = self.listener.accept() {
+            if !peer_is_self(&stream) {
+                return;
+            }
             stream.set_nonblocking(false).ok();
             let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
             let mut buf = String::new();
             let mut reader = io::BufReader::new(&stream);
-            if reader.read_line(&mut buf).unwrap_or(0) > 0 {
-                let line = buf.trim();
-                if !line.is_empty() {
-                    self.on_stdin(line);
+            match read_cmd_line(&mut reader, &mut buf) {
+                Ok(0) => {}
+                Ok(_) => {
+                    let line = buf.trim();
+                    if !line.is_empty() {
+                        self.on_stdin(line);
+                    }
+                }
+                Err(_) => {
+                    emit(serde_json::json!({"event":"error","error":"command too long"}));
                 }
             }
         }
@@ -639,6 +656,9 @@ impl Watch {
 
     #[allow(clippy::too_many_lines)]
     fn handle_cmd(&mut self, line: &str) -> Result<Option<serde_json::Value>> {
+        if line.len() > MAX_CMD_LINE {
+            return Err(Error::Invalid("command too long".into()));
+        }
         let v: serde_json::Value =
             serde_json::from_str(line).map_err(|e| Error::Protocol(format!("json: {e}")))?;
         let cmd = Cmd::parse(&v)?;
@@ -1034,11 +1054,58 @@ impl FocusEmit {
     }
 }
 
+fn read_small(path: &std::path::Path, max: usize) -> Option<String> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; max];
+    let n = f.read(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf[..n]).into_owned())
+}
+
+fn peer_is_self(stream: &UnixStream) -> bool {
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            std::ptr::from_mut(&mut cred).cast(),
+            &mut len,
+        )
+    };
+    rc == 0 && cred.uid == unsafe { libc::getuid() }
+}
+
+fn read_cmd_line(input: &mut impl BufRead, line: &mut String) -> io::Result<usize> {
+    line.clear();
+    let mut buf = Vec::new();
+    let n = Read::take(&mut *input, MAX_CMD_LINE as u64 + 1).read_until(b'\n', &mut buf)?;
+    if n == 0 {
+        return Ok(0);
+    }
+    if buf.len() > MAX_CMD_LINE {
+        if !buf.ends_with(&[b'\n']) {
+            let mut rest = Vec::new();
+            let _ = input.read_until(b'\n', &mut rest);
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "command too long",
+        ));
+    }
+    *line = String::from_utf8_lossy(&buf).into_owned();
+    Ok(n)
+}
+
 fn drain_preview(s: &mut Session) {
     let Some(p) = s.preview.as_ref() else {
         return;
     };
-    if let Ok(slot) = std::fs::read_to_string(p.dir.join("slot")) {
+    if let Some(slot) = read_small(&p.dir.join("slot"), MAX_SLOT_FILE) {
         if slot != s.last_slot {
             s.last_slot.clone_from(&slot);
             let file = if slot.trim() == "a" {
@@ -1046,8 +1113,8 @@ fn drain_preview(s: &mut Session) {
             } else {
                 p.dir.join("preview-b.jpg")
             };
-            let covered =
-                std::fs::read_to_string(p.dir.join("covered")).is_ok_and(|s| s.trim() == "1");
+            let covered = read_small(&p.dir.join("covered"), MAX_SLOT_FILE)
+                .is_some_and(|s| s.trim() == "1");
             emit_cam(
                 &s.disc,
                 serde_json::json!({"event":"frame","slot": slot.trim(), "path": file, "covered": covered}),
@@ -1062,7 +1129,7 @@ fn drain_preview(s: &mut Session) {
         }
     }
     if p.dir.join("error").exists() {
-        if let Ok(e) = std::fs::read_to_string(p.dir.join("error")) {
+        if let Some(e) = read_small(&p.dir.join("error"), 512) {
             let err = e.trim().to_string();
             let holder = if err == "busy" {
                 s.disc.video.as_deref().map(yolocam::holders::summarize)
@@ -1339,6 +1406,24 @@ mod tests {
             body: RpcBody::Get,
         };
         assert!(super::set_timeout_event(&p).is_none());
+    }
+
+    #[test]
+    fn cmd_line_rejects_oversize() {
+        let mut cursor = std::io::Cursor::new(vec![b'x'; super::MAX_CMD_LINE + 8]);
+        cursor.get_mut().push(b'\n');
+        let mut line = String::new();
+        let err = super::read_cmd_line(&mut cursor, &mut line).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn cmd_line_reads_short_json() {
+        let mut cursor = std::io::Cursor::new(b"{\"cmd\":\"refresh\"}\nmore\n".to_vec());
+        let mut line = String::new();
+        let n = super::read_cmd_line(&mut cursor, &mut line).unwrap();
+        assert!(n > 0);
+        assert!(line.contains("refresh"));
     }
 
     #[test]

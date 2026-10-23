@@ -82,6 +82,12 @@ pub fn drain(buf: &mut Vec<u8>) -> Result<Vec<Vec<u8>>> {
             i += 1;
             continue;
         }
+        if chunk[13] != xor_checksum(&chunk[8..13])
+            || chunk[14 + proto_size] != xor_checksum(&chunk[14..14 + proto_size])
+        {
+            i += total;
+            continue;
+        }
         payloads.push(chunk[14..14 + proto_size].to_vec());
         i += total;
     }
@@ -135,6 +141,16 @@ mod tests {
         assert_eq!(err.to_string(), "frame too large");
         assert!(before < 64);
         assert!(buf.len() < 64);
+    }
+
+    #[test]
+    fn drain_drops_bad_checksum() {
+        let mut frame = wrap_message(&pb::request(1, 7));
+        let last_payload = frame.len() - 2;
+        frame[last_payload] ^= 0xff;
+        let mut buf = frame;
+        let payloads = drain(&mut buf).unwrap();
+        assert!(payloads.is_empty());
     }
 
     #[test]

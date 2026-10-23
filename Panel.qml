@@ -159,7 +159,8 @@ Item {
     function onPreviewPathChanged() {
       var path = String(service.previewPath || "")
       if (path === "") return
-      var url = "file://" + path + "?" + service.previewSeq
+      var url = Model.previewFileUrl(path, service.previewSeq)
+      if (url === "") return
       var useA = path.indexOf("preview-a") !== -1
       if (useA) {
         if (previewA.status === Image.Loading) return
@@ -568,6 +569,7 @@ Item {
               Text {
                 id: heroLine1Metrics
                 visible: false
+                textFormat: Text.PlainText
                 text: "X"
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -713,6 +715,7 @@ Item {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
+                textFormat: Text.PlainText
                 text: !present ? "No camera connected"
                       : service.previewBusy ? ("In use by " + (service.previewHolder || "another app"))
                       : service.previewOn ? "Starting preview…"
@@ -750,6 +753,7 @@ Item {
               Text {
                 id: coverLabel
                 anchors.centerIn: parent
+                textFormat: Text.PlainText
                 text: "Lens looks covered"
                 color: Color.urgent
                 font.family: root.fontFamily
@@ -856,6 +860,7 @@ Item {
             visible: service.previewOn && root.previewReady && root.tab !== "focus"
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
             text: "Click the picture to stop the live view"
             color: root.dim
             font.family: root.fontFamily
@@ -1120,6 +1125,7 @@ Item {
       x: parent.slashPad
       y: parent.slashPad
       z: 0
+      textFormat: Text.PlainText
       text: "󰄀"
       color: root.tint(parent.s3Front ? root.s7Color : root.s3Color, root.modelControl(parent.s3Front ? "s7" : "s3"))
       font.family: root.fontFamily
@@ -1129,6 +1135,7 @@ Item {
       x: parent.slashPad + parent.shift
       y: parent.slashPad + parent.shift
       z: 1
+      textFormat: Text.PlainText
       text: "󰄀"
       color: !root.present
         ? root.dim
@@ -1484,6 +1491,7 @@ Item {
     Text {
       id: chipLabel
       anchors.centerIn: parent
+      textFormat: Text.PlainText
       text: parent.label
       color: parent.on ? Color.background : root.foreground
       font.family: root.fontFamily

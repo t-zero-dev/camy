@@ -8,16 +8,43 @@ function modelTitle(model) {
   return String(model) === "s3" ? "YoloCam S3" : "YoloCam S7"
 }
 
+var MAX_EVENT = 8192
+var MAX_LABEL = 120
+var MAX_ERROR = 200
+
 function helperPathFromUrl(url) {
   var s = String(url || "")
   if (s.indexOf("file://") === 0) s = s.substring(7)
   return s
 }
 
+function clip(s, n) {
+  s = String(s || "")
+  if (s.length > n) return s.substring(0, n)
+  return s
+}
+
+function plain(s, n) {
+  s = clip(s, n === undefined || n === null ? MAX_LABEL : n)
+  return s.replace(/[<>]/g, "")
+}
+
 function parseLine(text) {
   var raw = String(text || "").trim()
   if (!raw) return null
-  try { return JSON.parse(raw) } catch (e) { return { event: "error", error: raw } }
+  if (raw.length > MAX_EVENT) return { event: "error", error: "event too large" }
+  try { return JSON.parse(raw) } catch (e) { return { event: "error", error: "helper output was not JSON" } }
+}
+
+function previewFileUrl(path, seq) {
+  path = String(path || "")
+  if (path.charAt(0) !== "/") return ""
+  if (path.indexOf("..") !== -1) return ""
+  if (path.indexOf("://") !== -1) return ""
+  if (path.indexOf("?") !== -1 || path.indexOf("#") !== -1) return ""
+  if (!/\/preview-[ab]\.jpg$/.test(path)) return ""
+  if (path.indexOf("/yolocam/") === -1 && !/\/yolocam-[0-9]+\//.test(path)) return ""
+  return "file://" + path + "?" + seq
 }
 
 function shutterLabel(us) {
