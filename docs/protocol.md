@@ -56,6 +56,7 @@ This helper:
 - Holds one TCP client per plugged camera
 - Spaces RPCs by **160 ms**
 - Idle-fills one CID at a time (hero parameters first)
+- Waits **400 ms** for a GET reply and **2.5 s** for an Int/WB SET (HDMI format retrain is slow)
 - Sends CID **215** (stream heartbeat) about every 25 s
 - Does not restart the camera because a GET timed out
 - Does not SET a CID that has no named parameter
@@ -95,16 +96,16 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 | shutter-range | 32 | status | GetOnly |
 | wb-offset | 33 | wb | `{r, b}` |
 | focus-box | 38 | focus | enum large / medium / small |
-| caf | 42 | focus | enum off / on |
+| caf | 42 | focus | enum off / on (not exposed; firmware ignores) |
 | focus-speed | 47 | focus | enum fast=1 / medium=3 / slow=5 |
 | lens-status | 48 | status | GetOnly |
 | usb-version | 60 | status | GetOnly |
-| hdmi-format | 61 | video | enum auto / 4k / 1080p / 720p |
+| hdmi-format | 61 | video | enum auto / 4k / 1080p / 720p (SET can take ~1 s) |
 | lens-detail | 63 | status | GetOnly |
 | hdmi-color | 65 | video | enum auto / rgb / yuv422 |
 | audio-volume | 73 | audio | int 0–100 |
 | audio-denoise | 75 | audio | enum off / weak / middle / strong |
-| audio-reverb | 76 | audio | enum off / weak / middle / strong |
+| audio-reverb | 76 | audio | enum off / weak / middle / strong (not exposed) |
 | audio-delay | 77 | audio | int 0–400 ms |
 | audio-agc | 78 | audio | enum off / on |
 | mic-type | 79 | audio | enum line / mic |
@@ -116,7 +117,7 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 | wb-tone | 105 | wb | int 0–128 |
 | exposure-lock | 106 | exposure | enum off / on |
 | manu-focus | 111 | focus | int 0–100 |
-| zoom-speed | 112 | zoom | int 1–5 |
+| zoom-speed | 112 | zoom | int 1–5 (not exposed; firmware ignores) |
 
 ### Shutter denominators
 
@@ -140,7 +141,7 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 
 The S3 reports `resp_code` 100 (or is unused) for several S7 controls. The helper emits a `caps` event so the panel hides those rows. The current hide list:
 
-hue, gamma, zoom, lens-detail, mic-type, audio volume/denoise/reverb/delay/AGC, HDMI format/colour, brightness, distortion, CLUT / LUT mix.
+hue, gamma, zoom, lens-detail, mic-type, audio volume/denoise/delay/AGC, HDMI format/colour, brightness, distortion, CLUT / LUT mix.
 
 The Audio tab is hidden on S3 (no line/mic jack). Zoom tab is hidden when zoom is unsupported. 16:9 / 9:16 in the panel is a **preview-only** rotate; it is not a CID. Orientation must not be written as a SET.
 

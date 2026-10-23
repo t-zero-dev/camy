@@ -1917,7 +1917,6 @@ Item {
         }
       }
       EnumRow { title: "Focus speed"; name: "focus-speed"; options: [{value:"5",label:"Slow"},{value:"3",label:"Medium"},{value:"1",label:"Fast"}] }
-      EnumRow { title: "CAF"; name: "caf"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
       Loader {
         property int cardSpan: 2
         property bool cardSelected: false
@@ -1951,6 +1950,7 @@ Item {
     CardGrid {
       SettingCard {
         Layout.columnSpan: 2
+        cardSpan: 2
         title: "Zoom"
 
         function sliderNudge(dir, big) {
@@ -2077,13 +2077,6 @@ Item {
             }
           }
         }
-      }
-      SliderRow {
-        title: "Zoom speed"
-        name: "zoom-speed"
-        minimum: 1
-        maximum: 5
-        cardSpan: 2
       }
     }
   }
@@ -2237,8 +2230,7 @@ Item {
       SliderRow { title: "Delay (ms)"; name: "audio-delay"; maximum: 400 }
       EnumRow { title: "Input"; name: "mic-type"; options: [{value:"0",label:"Line"},{value:"1",label:"Mic"}] }
       EnumRow { title: "Auto gain"; name: "audio-agc"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
-      EnumRow { title: "Noise cancellation"; name: "audio-denoise"; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
-      EnumRow { title: "Reverb"; name: "audio-reverb"; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
+      EnumRow { title: "Noise cancellation"; name: "audio-denoise"; cardSpan: 2; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
     }
   }
 

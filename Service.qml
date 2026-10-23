@@ -178,6 +178,11 @@ Item {
       }
       lastError = ""
       if (Number(ev.resp) === 100) {
+        if (pending[name] !== undefined) {
+          lastError = "Camera rejected that setting"
+          clearPending(name, "Camera did not confirm")
+          return
+        }
         var hide = Object.assign({}, unsupported)
         hide[name] = true
         unsupported = hide

@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 const MAX_CMD_LINE: usize = 8 * 1024;
 const MAX_SLOT_FILE: usize = 64;
+const GET_RPC_TIMEOUT: Duration = Duration::from_millis(400);
+const SET_RPC_TIMEOUT: Duration = Duration::from_millis(2500);
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use yolocam::client::Client;
@@ -34,6 +36,14 @@ enum RpcBody {
 impl RpcBody {
     fn timeout_is_error(self) -> bool {
         matches!(self, Self::Set(SetPayload::Int(_) | SetPayload::Wb { .. }))
+    }
+
+    fn rpc_timeout(self) -> Duration {
+        if self.timeout_is_error() {
+            SET_RPC_TIMEOUT
+        } else {
+            GET_RPC_TIMEOUT
+        }
     }
 
     fn set_wire(self) -> Option<u32> {
@@ -312,7 +322,8 @@ impl Watch {
             }
             if let Some(p) = &s.rpc.pending {
                 wait = wait.min(
-                    Duration::from_millis(400)
+                    p.body
+                        .rpc_timeout()
                         .saturating_sub(p.started.elapsed())
                         .max(Duration::from_millis(5)),
                 );
@@ -438,7 +449,7 @@ impl Watch {
             .rpc
             .pending
             .as_ref()
-            .is_some_and(|p| p.started.elapsed() > Duration::from_millis(400));
+            .is_some_and(|p| p.started.elapsed() > p.body.rpc_timeout());
         if timed_out {
             if let Some(p) = s.rpc.pending.take() {
                 if let Some(ev) = set_timeout_event(&p) {
@@ -1429,6 +1440,12 @@ mod tests {
         assert!(RpcBody::Set(SetPayload::Int(1)).timeout_is_error());
         assert!(!RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF::default())).timeout_is_error());
         assert!(!RpcBody::Get.timeout_is_error());
+        assert_eq!(
+            RpcBody::Set(SetPayload::Int(1)).rpc_timeout(),
+            super::SET_RPC_TIMEOUT
+        );
+        assert_eq!(RpcBody::Get.rpc_timeout(), super::GET_RPC_TIMEOUT);
+        assert!(super::SET_RPC_TIMEOUT > super::GET_RPC_TIMEOUT);
         assert_eq!(RpcBody::Set(SetPayload::Int(9)).set_wire(), Some(9));
         assert!(
             RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF::default()))
