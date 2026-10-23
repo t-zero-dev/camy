@@ -117,6 +117,60 @@ var TABS = [
   { id: "status", label: "Status" }
 ]
 
+// Nerd Font Material glyphs (CaskaydiaMono), one per card title so a
+// row is identifiable without reading it.
+var CARD_ICONS = {
+  "Orientation": "󰑵",
+  "Frame rate": "󰥔",
+  "Vertical flip": "󰈉",
+  "HDMI color": "󰸌",
+  "HDMI format": "󰡁",
+  "Sharpness": "󰉗",
+  "Contrast": "󰐩",
+  "Saturation": "󰕣",
+  "Brightness": "󰃠",
+  "Dynamic range": "󰃡",
+  "Hue": "󰒞",
+  "Gamma": "󰕚",
+  "Vignette": "󰝥",
+  "AF area": "󰒉",
+  "Focus mode": "󰽎",
+  "Focus speed": "󰓅",
+  "Manual focus": "󰈐",
+  "Lens correction": "󰋫",
+  "Zoom": "󰍉",
+  "Exposure": "󰄄",
+  "EV": "󰃝",
+  "Anti-flicker": "󰥜",
+  "ISO": "󰌳",
+  "Shutter": "󱎫",
+  "Aperture": "󰄊",
+  "HDR": "󰵏",
+  "Lock": "󰌾",
+  "White balance": "󰖨",
+  "WB": "󰔏",
+  "Tone": "󰕹",
+  "Picker": "󰈋",
+  "Red offset": "󰌁",
+  "Blue offset": "󰌁",
+  "WB lock": "󰌾",
+  "Volume": "󰕾",
+  "Delay (ms)": "󰔛",
+  "Input": "󰍬",
+  "Auto gain": "󰓃",
+  "Noise cancellation": "󰗅",
+  "Model": "󰄀",
+  "Firmware": "󰚥",
+  "Serial": "󰓹",
+  "Control": "󰛳",
+  "UVC": "󰕓",
+  "Lens": "󰋫"
+}
+
+function cardIcon(title) {
+  return CARD_ICONS[String(title || "")] || "󰘮"
+}
+
 function tabOptions() {
   return TABS.map(function(t) { return { value: t.id, label: t.label } })
 }

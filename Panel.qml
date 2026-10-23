@@ -47,14 +47,16 @@ Item {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool present: service.usb === true
-  readonly property string camGlyph: present ? "󰄀" : "󰵝"
   readonly property int glyphCode: Number(service.glyphCode || 0)
   readonly property bool hasS7: glyphCode === 7 || glyphCode === 10
   readonly property bool hasS3: glyphCode === 3 || glyphCode === 10
   readonly property color s7Color: Color.accent
   readonly property color s3Color: hueShift(Color.accent, 0.22)
   readonly property color iconColor: !present ? dim : (hasS3 && !hasS7 ? tint(s3Color, service.control) : tint(s7Color, service.control))
-  readonly property string heroTitle: service.selectedTitle || "YoloCam S7"
+  readonly property string heroTitle: present
+    ? (service.selectedTitle || "YoloCam S7")
+    : "No camera connected"
+  property string connectHint: ""
   readonly property bool showPicker: service.bothCameras === true
   readonly property var tabList: {
     var all = Model.TABS
@@ -191,8 +193,37 @@ Item {
 
   function val(name, fallback) { return service.valueOf(name, fallback) }
 
+  function flashConnectHint() {
+    connectHint = "Connect a camera to make changes"
+    connectHintClear.restart()
+  }
+
+  function guardEdit() {
+    if (present) return true
+    flashConnectHint()
+    return false
+  }
+
+  function setParam(name, value) {
+    if (!guardEdit()) return false
+    service.setParam(name, value)
+    return true
+  }
+
   function setNum(name, value) {
-    service.setParam(name, Math.round(value))
+    return setParam(name, Math.round(value))
+  }
+
+  function setWbOffset(r, b) {
+    if (!guardEdit()) return
+    service.setWbOffset(r, b)
+  }
+
+  Timer {
+    id: connectHintClear
+    interval: 1800
+    repeat: false
+    onTriggered: root.connectHint = ""
   }
 
   property var editingBox: null
@@ -212,6 +243,7 @@ Item {
   }
 
   function cycleCamera(dir) {
+    if (!guardEdit()) return
     var ids = cameraIds()
     if (ids.length < 2) return
     var cur = String(service.selectedModel || "")
@@ -223,6 +255,7 @@ Item {
   }
 
   function jumpCamera(n) {
+    if (!guardEdit()) return
     var ids = cameraIds()
     if (n < 1 || n > ids.length) return
     service.selectModel(ids[n - 1])
@@ -329,21 +362,25 @@ Item {
   }
 
   function nudgeCard(dir, big) {
+    if (!guardEdit()) return
     var c = selectedCard()
     if (c && typeof c.nudge === "function") c.nudge(dir, !!big)
   }
 
   function activateCard() {
+    if (!guardEdit()) return
     var c = selectedCard()
     if (c && typeof c.activateCard === "function") c.activateCard()
   }
 
   function typeCardDigit(t) {
+    if (!guardEdit()) return
     var c = selectedCard()
     if (c && typeof c.typeDigit === "function") c.typeDigit(t)
   }
 
   function beginEdit(box) {
+    if (!guardEdit()) return
     if (!box) return
     root.editingBox = box
     box.forceActiveFocus()
@@ -361,12 +398,14 @@ Item {
   }
 
   function refreshStatus() {
+    if (!guardEdit()) return
     if (root.tab !== "status") return
     if (typeof service.send === "function") service.send({ cmd: "tab", name: "status" })
     service.refresh()
   }
 
   function togglePreview() {
+    if (!guardEdit()) return
     service.setPreview(!service.previewOn)
   }
 
@@ -674,7 +713,7 @@ Item {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
-                text: !present ? "Camera unplugged"
+                text: !present ? "No camera connected"
                       : service.previewBusy ? ("In use by " + (service.previewHolder || "another app"))
                       : service.previewOn ? "Starting preview…"
                       : (service.lastError ? String(service.lastError) : "Click for live preview")
@@ -722,7 +761,7 @@ Item {
             MouseArea {
               id: previewClick
               anchors.fill: parent
-              enabled: root.opened && present
+              enabled: root.opened
               hoverEnabled: true
               preventStealing: root.tab === "focus" && service.previewOn
               cursorShape: root.tab === "focus" && service.previewOn && root.afInteractive()
@@ -806,7 +845,7 @@ Item {
                 void mouse
                 if (root.afDragging || root.afMoving) return
                 if (service.previewOn && root.tab === "focus") return
-                service.setPreview(!service.previewOn)
+                root.togglePreview()
               }
             }
             }
@@ -872,6 +911,30 @@ Item {
           }
         }
       }
+
+      Rectangle {
+        z: 50
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(16)
+        visible: root.connectHint !== ""
+        height: hintLab.implicitHeight + Style.space(12)
+        radius: Style.cornerRadius
+        color: Color.popups.background
+        border.width: Math.max(1, Style.normalBorderWidth)
+        border.color: Color.accent
+        Text {
+          id: hintLab
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: root.connectHint
+          color: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.weight: Font.DemiBold
+        }
+      }
     }
 
   function scrollPanel(wheel) {
@@ -913,6 +976,7 @@ Item {
   }
 
   function placeAfS(nx, ny) {
+    if (!guardEdit()) return
     var size = Model.afSize(1, 0)
     var box = Model.boxAt(nx, ny, size)
     root.localAf = box
@@ -921,6 +985,7 @@ Item {
   }
 
   function placeAfC(nx, ny) {
+    if (!guardEdit()) return
     var size = Model.afSize(3, val("focus-box", 0))
     var box = Model.boxAt(nx, ny, size)
     root.localAf = box
@@ -929,6 +994,7 @@ Item {
   }
 
   function setAfcShape(v) {
+    if (!guardEdit()) return
     var n = Number(v)
     root.afcCustom = n === 3
     if (n === 3) {
@@ -991,7 +1057,7 @@ Item {
 
   function heroStatus() {
     if (service.applyStatus !== "") return service.applyStatus
-    if (!present) return service.lastError !== "" ? service.lastError : "Unplugged"
+    if (!present) return ""
     if (service.previewBusy) return "In use by " + (service.previewHolder || "another app")
     if (!service.control) return service.lastError !== "" ? service.lastError : "USB only — no control"
     if (service.lastError !== "") return service.lastError
@@ -1037,16 +1103,22 @@ Item {
 
   component CamMark: Item {
     property real pixelSize: Style.bar.iconFont
-    readonly property bool stacked: root.hasS3 && root.hasS7
+    readonly property bool stacked: root.present && root.hasS3 && root.hasS7
     readonly property bool s3Front: String(service.selectedModel) === "s3"
     readonly property real shift: stacked ? Math.max(2, Math.round(pixelSize * 0.2)) : 0
-    implicitWidth: pixelSize + shift
-    implicitHeight: pixelSize + shift
+    readonly property real slashPad: root.present ? 0 : Math.round(pixelSize * 0.55)
+    readonly property real slashAngle: -40
+    readonly property real slashNudge: root.present ? 0 : pixelSize * 0.17
+    readonly property real slashDx: -slashNudge * Math.cos(Math.abs(slashAngle) * Math.PI / 180)
+    readonly property real slashDy: slashNudge * Math.sin(Math.abs(slashAngle) * Math.PI / 180)
+    clip: false
+    implicitWidth: pixelSize + shift + slashPad * 2
+    implicitHeight: pixelSize + shift + slashPad * 2
 
     Text {
       visible: stacked
-      x: 0
-      y: 0
+      x: parent.slashPad
+      y: parent.slashPad
       z: 0
       text: "󰄀"
       color: root.tint(parent.s3Front ? root.s7Color : root.s3Color, root.modelControl(parent.s3Front ? "s7" : "s3"))
@@ -1054,10 +1126,10 @@ Item {
       font.pixelSize: parent.pixelSize
     }
     Text {
-      x: parent.shift
-      y: parent.shift
+      x: parent.slashPad + parent.shift
+      y: parent.slashPad + parent.shift
       z: 1
-      text: root.present ? "󰄀" : "󰵝"
+      text: "󰄀"
       color: !root.present
         ? root.dim
         : stacked
@@ -1067,6 +1139,32 @@ Item {
             : root.tint(root.s7Color, root.modelControl("s7"))
       font.family: root.fontFamily
       font.pixelSize: parent.pixelSize
+    }
+    Rectangle {
+      visible: !root.present
+      z: 2
+      width: parent.pixelSize * 1.95
+      height: Math.max(4, Math.round(parent.pixelSize * 0.28))
+      radius: height / 2
+      color: Color.popups.background
+      rotation: parent.slashAngle
+      antialiasing: true
+      anchors.centerIn: parent
+      anchors.horizontalCenterOffset: parent.slashDx
+      anchors.verticalCenterOffset: parent.slashDy
+    }
+    Rectangle {
+      visible: !root.present
+      z: 3
+      width: parent.pixelSize * 1.95
+      height: Math.max(2, Math.round(parent.pixelSize * 0.11))
+      radius: height / 2
+      color: root.dim
+      rotation: parent.slashAngle
+      antialiasing: true
+      anchors.centerIn: parent
+      anchors.horizontalCenterOffset: parent.slashDx
+      anchors.verticalCenterOffset: parent.slashDy
     }
   }
 
@@ -1190,6 +1288,7 @@ Item {
     default property alias extra: extraColumn.data
     property alias header: headerSlot.data
     property string title: ""
+    property string icon: title !== "" ? Model.cardIcon(title) : ""
     property string valueText: ""
     property string hint: ""
     property bool hintAlarm: false
@@ -1284,23 +1383,42 @@ Item {
         id: titleRow
         width: parent.width
         visible: card.title !== "" || headerSlot.width > 0
-        height: Math.max(titleLab.implicitHeight, headerSlot.height)
+        height: Math.max(titleCluster.implicitHeight, headerSlot.height)
         implicitHeight: height
 
-        Text {
-          id: titleLab
-          anchors.left: parent.left
-          anchors.right: headerSlot.left
-          anchors.rightMargin: headerSlot.width > 0 ? Style.space(8) : 0
+        Row {
+          id: titleCluster
+          spacing: Style.space(6)
           anchors.verticalCenter: parent.verticalCenter
-          textFormat: Text.PlainText
-          text: card.title
-          horizontalAlignment: headerSlot.width > 0 ? Text.AlignLeft : Text.AlignHCenter
-          elide: Text.ElideRight
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.subtitle
-          font.weight: Font.DemiBold
+          x: headerSlot.width > 0 ? 0 : Math.max(0, (titleRow.width - implicitWidth) / 2)
+          width: headerSlot.width > 0
+            ? Math.max(0, titleRow.width - headerSlot.width - Style.space(8))
+            : implicitWidth
+
+          Text {
+            id: glyphLab
+            visible: card.icon !== ""
+            textFormat: Text.PlainText
+            text: card.icon
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.icon
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Text {
+            id: titleLab
+            width: headerSlot.width > 0
+              ? Math.max(0, parent.width - (glyphLab.visible ? glyphLab.implicitWidth + parent.spacing : 0))
+              : implicitWidth
+            textFormat: Text.PlainText
+            text: card.title
+            elide: Text.ElideRight
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.subtitle
+            font.weight: Font.DemiBold
+            anchors.verticalCenter: parent.verticalCenter
+          }
         }
         Item {
           id: headerSlot
@@ -1308,6 +1426,7 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           width: childrenRect.width
           height: childrenRect.height
+          opacity: root.present ? 1 : 0.45
         }
       }
       Text {
@@ -1324,6 +1443,7 @@ Item {
         id: extraColumn
         width: parent.width
         spacing: Style.space(6)
+        opacity: root.present ? 1 : 0.45
       }
       Text {
         width: parent.width
@@ -1337,6 +1457,17 @@ Item {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      }
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      enabled: !root.present
+      z: 20
+      hoverEnabled: true
+      onPressed: function(mouse) {
+        root.flashConnectHint()
+        mouse.accepted = true
       }
     }
   }
@@ -1363,6 +1494,7 @@ Item {
       anchors.fill: parent
       cursorShape: Qt.PointingHandCursor
       onClicked: {
+        if (!root.guardEdit()) return
         service.selectModel(parent.modelId)
         if (typeof service.send === "function") service.send({ cmd: "tab", name: root.tab })
       }
@@ -1389,7 +1521,7 @@ Item {
         fontFamily: root.fontFamily
         fontSize: Style.font.caption
         focusable: false
-        onChanged: function(v) { root.service.setParam(erow.name, v) }
+        onChanged: function(v) { root.setParam(erow.name, v) }
       }
     }
   }
@@ -1411,7 +1543,7 @@ Item {
       var b = Number(o && o.b) || 10
       if (channel === "r") r = n
       else b = n
-      service.setWbOffset(r, b)
+      root.setWbOffset(r, b)
     }
 
     header: Text {
@@ -1440,7 +1572,7 @@ Item {
           var b = Number(o && o.b) || 10
           if (channel === "r") r = v
           else b = v
-          service.setWbOffset(r, b)
+          root.setWbOffset(r, b)
         }
       }
       MouseArea {
@@ -1582,7 +1714,14 @@ Item {
         onMoved: function(v) {
           if (!box.activeFocus) box.text = srow.formatLive(v)
         }
-        onReleased: function(v) { root.setNum(srow.name, v) }
+        onReleased: function(v) {
+          if (!root.present) {
+            root.flashConnectHint()
+            box.text = srow.formatLive(Number(root.val(srow.name, srow.minimum)))
+            return
+          }
+          root.setNum(srow.name, v)
+        }
       }
       MouseArea {
         anchors.fill: sl
@@ -1641,7 +1780,7 @@ Item {
             background: Color.popups.background
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            onChanged: function(v) { root.previewOrientation = v }
+            onChanged: function(v) { if (root.guardEdit()) root.previewOrientation = v }
           }
         }
       }
@@ -1661,7 +1800,7 @@ Item {
             background: Color.popups.background
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            onChanged: function(v) { root.previewFlipV = v === "1" }
+            onChanged: function(v) { if (root.guardEdit()) root.previewFlipV = v === "1" }
           }
         }
       }
@@ -1743,13 +1882,13 @@ Item {
               root.focusHoverTip = on && index >= 0 && index < tips.length ? tips[index] : ""
             }
             onChanged: function(v) {
-              root.service.setParam("focus-mode", v)
+              if (!root.setParam("focus-mode", v)) return
               var mode = Number(v)
               if (mode === 3 && !root.afcCustom) {
                 var box = Model.afRegion(3, root.val("focus-box", 0))
                 if (box) {
                   root.localAf = box
-                  root.service.setAfArea(box)
+                  service.setAfArea(box)
                 }
                 root.afHint = "Click the preview to place the AF area."
               } else if (mode === 1) {
@@ -1805,7 +1944,7 @@ Item {
           var n = Model.zoomMult(root.val("zoom", 50)) + dir * step
           n = Math.max(1, Math.min(4, n))
           n = Math.round(n * 10) / 10
-          root.service.setParam("zoom", Model.zoomRaw(n))
+          root.setParam("zoom", Model.zoomRaw(n))
           zbox.text = Number(n).toFixed(1)
         }
         function sliderActivate() { root.beginEdit(zbox) }
@@ -1838,7 +1977,7 @@ Item {
               var n = Number(text)
               if (isNaN(n)) { text = Model.zoomMult(root.val("zoom", 50)).toFixed(1); return }
               n = Math.max(1, Math.min(4, n))
-              root.service.setParam("zoom", Model.zoomRaw(n))
+              root.setParam("zoom", Model.zoomRaw(n))
               text = Number(n).toFixed(1)
               root.editingBox = null
               if (keyCatcher) keyCatcher.forceActiveFocus()
@@ -1861,7 +2000,14 @@ Item {
             integer: false
             value: Model.zoomMult(root.val("zoom", 50))
             onMoved: function(v) { zbox.text = Number(v).toFixed(1) }
-            onReleased: function(v) { root.service.setParam("zoom", Model.zoomRaw(v)) }
+            onReleased: function(v) {
+              if (!root.present) {
+                root.flashConnectHint()
+                zbox.text = Model.zoomMult(root.val("zoom", 50)).toFixed(1)
+                return
+              }
+              root.setParam("zoom", Model.zoomRaw(v))
+            }
           }
           Text {
             id: wMark
@@ -2036,8 +2182,8 @@ Item {
               onClicked: function(mouse) {
                 var k = Math.round(2000 + (mouse.x / Math.max(1, parent.width)) * 8000)
                 var t = Math.round(128 - (mouse.y / Math.max(1, parent.height)) * 128)
-                root.service.setParam("wb-temp", Math.max(2000, Math.min(10000, k)))
-                root.service.setParam("wb-tone", Math.max(0, Math.min(128, t)))
+                root.setParam("wb-temp", Math.max(2000, Math.min(10000, k)))
+                root.setParam("wb-tone", Math.max(0, Math.min(128, t)))
                 wbPad.requestPaint()
               }
             }
@@ -2079,7 +2225,7 @@ Item {
       SettingCard {
         title: "Model"
         cardSelectable: false
-        valueText: service.selectedModel === "s3" ? "S3" : "S7"
+        valueText: !root.present ? "—" : (service.selectedModel === "s3" ? "S3" : "S7")
       }
       SettingCard {
         title: "Firmware"
@@ -2131,10 +2277,7 @@ Item {
           tooltipText: "Refresh from camera"
           foreground: root.foreground
           fontFamily: root.fontFamily
-          onClicked: {
-            if (typeof service.send === "function") service.send({ cmd: "tab", name: "status" })
-            service.refresh()
-          }
+          onClicked: root.refreshStatus()
         }
       }
     }

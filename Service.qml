@@ -69,6 +69,11 @@ Item {
         previewOn = false
         focusRects = []
         focusArea = null
+        firmware = ""
+        serial = ""
+        product = ""
+        cameraIp = ""
+        videoDevice = ""
         lastError = "YoloCam not on USB"
       }
       return
@@ -97,6 +102,11 @@ Item {
         previewOn = false
         focusRects = []
         focusArea = null
+        firmware = ""
+        serial = ""
+        product = ""
+        cameraIp = ""
+        videoDevice = ""
         lastError = "YoloCam not on USB"
       } else if (lastError === "YoloCam not on USB" || lastError === "unplugged") {
         lastError = ""
@@ -255,6 +265,7 @@ Item {
   }
 
   function selectModel(model) {
+    if (!usb) return
     var m = String(model || "s7")
     if (m !== "s3" && m !== "s7") return
     if (m === selectedModel && bothCameras) {
@@ -276,6 +287,7 @@ Item {
   }
 
   function setWbOffset(r, b) {
+    if (!usb) return
     var next = Object.assign({}, values)
     next["wb-offset"] = { r: Number(r), b: Number(b) }
     values = next
@@ -284,6 +296,7 @@ Item {
   }
 
   function setParam(name, value) {
+    if (!usb) return
     var next = Object.assign({}, values)
     next[name] = value
     values = next
@@ -301,25 +314,27 @@ Item {
   }
 
   function refresh() {
+    if (!usb) return
     applyStatus = "Refreshing…"
     refreshWatchdog.restart()
     send({ cmd: "refresh", model: selectedModel })
   }
 
   function setPreview(on) {
+    if (on && !usb) return
     if (!previewEnabled && on) return
     if (on) lastError = ""
     send({ cmd: "preview", on: !!on, model: selectedModel })
   }
 
   function setAfTarget(rect) {
-    if (!rect) return
+    if (!usb || !rect) return
     applyStatus = "Setting AF point…"
     send({ cmd: "af-target", x: rect.x, y: rect.y, w: rect.w, h: rect.h, model: selectedModel })
   }
 
   function setAfArea(rect) {
-    if (!rect) return
+    if (!usb || !rect) return
     applyStatus = "Setting AF area…"
     send({ cmd: "af-area", x: rect.x, y: rect.y, w: rect.w, h: rect.h, model: selectedModel })
   }
