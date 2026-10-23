@@ -80,8 +80,8 @@ Tabs, left to right:
 
 | Tab | What is on it |
 | --- | --- |
-| Video | Orientation, frame rate, resolution, vertical flip (S7), HDMI colour, HDMI format |
-| Image | Image version (V0/V1), sharpness, contrast, saturation, brightness, dynamic range, hue, gamma, vignette |
+| Video | Orientation, frame rate, resolution (USB), vertical flip (S7), HDMI colour, HDMI output |
+| Image | Sharpness, contrast, saturation, brightness, dynamic range, hue, gamma, vignette |
 | Focus | Mode, speed, AF area or manual focus, lens correction |
 | Zoom | 1.0×–4.0× (optical on S7, digital on S3) |
 | Exposure | Auto/manual, EV or ISO/shutter, anti-flicker, aperture, HDR, lock |
@@ -89,7 +89,7 @@ Tabs, left to right:
 | Audio | Volume, delay, Line/Mic, auto gain, noise cancellation (S7 only) |
 | Status | Model, firmware, serial, control IP, UVC node, lens — Refresh only |
 
-Image has nine cards; on a short laptop window the list scrolls. Tab and arrows keep the selected card on screen.
+Image has eight cards; on a short laptop window the list scrolls. Tab and arrows keep the selected card on screen.
 
 A covered lens paints an overlay on the preview. ISO, shutter, zoom, and focus under the title stay visible. Hover those readouts for a one-line gloss.
 

@@ -477,13 +477,13 @@ impl Watch {
         if s.rpc.pending.is_some() {
             return;
         }
-        if model == Model::S3 {
-            if let Some(q) = s.rpc.queued.as_mut() {
-                if q.name == "zoom" {
-                    if let Some(wire) = q.body.set_wire() {
+        if let Some(q) = s.rpc.queued.as_mut() {
+            if q.name == "zoom" {
+                if let Some(wire) = q.body.set_wire() {
+                    if model == Model::S3 {
                         s.s3_zoom = wire;
-                        q.body = SetPayload::Rect(params::zoom_rect(wire));
                     }
+                    q.body = params::zoom_set_payload(model == Model::S3, wire);
                 }
             }
         }
@@ -673,6 +673,9 @@ impl Watch {
                 &s.disc,
                 serde_json::json!({"event":"caps","unsupported": names}),
             );
+            if s.disc.model == Model::S3 {
+                emit_s3_zoom(&s.disc, s.s3_zoom);
+            }
         }
     }
 

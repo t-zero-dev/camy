@@ -659,43 +659,54 @@ Item {
               width: root.portraitPreview ? Math.round(parent.height * 9 / 16) : parent.width
               height: parent.height
               clip: true
+              // Bind zoom to values/pending the same way heroReadouts does, or
+              // the pane keeps 1× while the slider and 2.9× readout move.
               readonly property real zoom: {
+                var _vals = service.values
+                var _pend = service.pending
                 if (String(service.selectedModel) !== "s3") return 1
-                var m = Model.zoomMult(root.val("zoom", 50))
+                var raw = 50
+                if (_pend && _pend["zoom"] !== undefined && _pend["zoom"] !== null)
+                  raw = _pend["zoom"]
+                else if (_vals && _vals["zoom"] !== undefined && _vals["zoom"] !== null)
+                  raw = _vals["zoom"]
+                var m = Model.zoomMult(raw)
                 return Math.max(1, Math.min(4, m))
               }
+              readonly property real frameW: root.portraitPreview ? height : width
+              readonly property real frameH: root.portraitPreview ? width : height
 
             Image {
               id: previewA
               anchors.centerIn: parent
-              width: (root.portraitPreview ? parent.height : parent.width) * viewBox.zoom
-              height: (root.portraitPreview ? parent.width : parent.height) * viewBox.zoom
+              width: viewBox.frameW * viewBox.zoom
+              height: viewBox.frameH * viewBox.zoom
               rotation: root.portraitPreview ? 90 : 0
               transform: Scale { origin.x: previewA.width / 2; origin.y: previewA.height / 2; yScale: root.previewFlipV ? -1 : 1 }
               fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
-              smooth: false
+              smooth: true
               visible: root.previewShowA && status === Image.Ready
-              sourceSize.width: width
-              sourceSize.height: height
+              sourceSize.width: viewBox.frameW
+              sourceSize.height: viewBox.frameH
               onStatusChanged: if (status === Image.Ready) { root.previewShowA = true; root.previewReady = true }
             }
 
             Image {
               id: previewB
               anchors.centerIn: parent
-              width: (root.portraitPreview ? parent.height : parent.width) * viewBox.zoom
-              height: (root.portraitPreview ? parent.width : parent.height) * viewBox.zoom
+              width: viewBox.frameW * viewBox.zoom
+              height: viewBox.frameH * viewBox.zoom
               rotation: root.portraitPreview ? 90 : 0
               transform: Scale { origin.x: previewB.width / 2; origin.y: previewB.height / 2; yScale: root.previewFlipV ? -1 : 1 }
               fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
-              smooth: false
+              smooth: true
               visible: !root.previewShowA && status === Image.Ready
-              sourceSize.width: width
-              sourceSize.height: height
+              sourceSize.width: viewBox.frameW
+              sourceSize.height: viewBox.frameH
               onStatusChanged: if (status === Image.Ready) { root.previewShowA = false; root.previewReady = true }
             }
 
@@ -1819,14 +1830,13 @@ Item {
         }
       }
       EnumRow { title: "HDMI color"; name: "hdmi-color"; options: [{value:"0",label:"Auto"},{value:"1",label:"RGB"},{value:"2",label:"YUV422"}] }
-      EnumRow { title: "HDMI format"; name: "hdmi-format"; options: [{value:"0",label:"Auto"},{value:"1",label:"4K"},{value:"2",label:"1080p"},{value:"3",label:"720p"}] }
+      EnumRow { title: "HDMI output"; name: "hdmi-format"; options: [{value:"0",label:"Auto"},{value:"1",label:"4K"},{value:"2",label:"1080p"},{value:"3",label:"720p"}] }
     }
   }
 
   Component {
     id: imageTab
     CardGrid {
-      EnumRow { title: "Image version"; name: "image-version"; fallback: "0"; options: [{value:"0",label:"V0"},{value:"1",label:"V1"}] }
       SliderRow { title: "Sharpness"; name: "sharpness"; minimum: -10; maximum: 30 }
       SliderRow { title: "Contrast"; name: "contrast" }
       SliderRow { title: "Saturation"; name: "saturation" }

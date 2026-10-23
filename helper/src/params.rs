@@ -625,6 +625,15 @@ pub fn zoom_rect(raw: u32) -> crate::pb::RectF {
     box_at(0.5, 0.5, size)
 }
 
+/// S7 optical zoom is CID 13 Int. S3 digital zoom is a centred CID 13 Rect.
+pub fn zoom_set_payload(s3: bool, wire: u32) -> SetPayload {
+    if s3 {
+        SetPayload::Rect(zoom_rect(wire))
+    } else {
+        SetPayload::Int(wire)
+    }
+}
+
 pub fn zoom_raw_from_rect(r: crate::pb::RectF) -> u32 {
     let size = r.w.min(r.h).clamp(0.25, 1.0);
     zoom_raw(1.0 / f64::from(size))
@@ -831,6 +840,16 @@ mod tests {
         assert!((tele.x - 0.375).abs() < 1e-4);
         assert_eq!(super::zoom_raw_from_rect(tele), 98);
         assert_eq!(super::zoom_raw_from_rect(wide), 50);
+    }
+
+    #[test]
+    fn zoom_set_payload_s7_stays_int_s3_is_rect() {
+        assert_eq!(super::zoom_set_payload(false, 80), SetPayload::Int(80));
+        assert_eq!(super::zoom_set_payload(false, 50), SetPayload::Int(50));
+        let s3 = super::zoom_set_payload(true, 80);
+        let rect = s3.set_rect().expect("s3 zoom is a crop rect");
+        assert_eq!(super::zoom_raw_from_rect(rect), 80);
+        assert!(s3.set_wire().is_none());
     }
 
     #[test]

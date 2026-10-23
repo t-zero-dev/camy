@@ -180,6 +180,7 @@ var CARD_ICONS = {
   "Vertical flip": "󰈉",
   "HDMI color": "󰸌",
   "HDMI format": "󰡁",
+  "HDMI output": "󰡁",
   "Resolution": "󰨇",
   "Sharpness": "󰉗",
   "Contrast": "󰐩",

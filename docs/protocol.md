@@ -80,7 +80,7 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 | saturation | 10 | image | int 0–100 |
 | hue | 11 | image | int 0–100 |
 | gamma | 12 | image | int 0–100 |
-| image-version | 4 | image | enum v0=0 / v1=1 (Compose colour profile; CID_SCENE). Set-only; GET is not sent. |
+| image-version | 4 | image | parked; not in the panel. Compose V0/V1 colour profile (CID_SCENE). GET is not sent. |
 | zoom | 13 | zoom | int 50–98 (`mult = 0.0625 × raw − 2.125`). S7 optical via CID 13 Int. S3 4× digital ePTZ: SET is a centred crop rect (`w=h=1/mult`); the panel also scales the preview. |
 | exposure-mode | 14 | exposure | enum auto / manual |
 | ev | 15 | exposure | int 0–16 (8 is 0 EV) |
@@ -101,7 +101,7 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 | focus-speed | 47 | focus | enum fast=1 / medium=3 / slow=5 |
 | lens-status | 48 | status | GetOnly |
 | usb-version | 60 | status | GetOnly |
-| hdmi-format | 61 | video | enum auto / 4k / 1080p / 720p (SET can take ~1 s) |
+| hdmi-format | 61 | video | HDMI port size: enum auto / 4k / 1080p / 720p (SET can take ~1 s). Independent of `resolution` (USB/UVC, CID 6). |
 | lens-detail | 63 | status | GetOnly |
 | hdmi-color | 65 | video | enum auto / rgb / yuv422 |
 | audio-volume | 73 | audio | int 0–100 |
@@ -144,7 +144,7 @@ The S3 reports `resp_code` 100 (or is unused) for several S7 controls. The helpe
 
 hue, gamma, lens-detail, mic-type, audio volume/denoise/delay/AGC, HDMI format/colour, brightness, distortion, CLUT / LUT mix.
 
-The Audio tab is hidden on S3 (no line/mic jack). Zoom is on both bodies: S7 optical (CID 13 Int), S3 4× digital ePTZ (CID 13 Rect crop plus preview scale). Image version (V0 warm / V1 cool) is CID 4. 16:9 / 9:16 in the panel is a **preview-only** rotate; it is not a CID. Orientation must not be written as a SET.
+The Audio tab is hidden on S3 (no line/mic jack). Zoom is on both bodies: S7 optical (CID 13 Int), S3 4× digital ePTZ (CID 13 Rect crop plus preview scale). Image version is parked. 16:9 / 9:16 in the panel is a **preview-only** rotate; it is not a CID. Orientation must not be written as a SET.
 
 Aperture on a body without a driven iris is present as GET 200 with a degenerate range; the panel hides the slider when the range is empty.
 
