@@ -94,6 +94,7 @@ impl std::str::FromStr for ParamId {
 
 define_params! {
     Firmware => "firmware", 1, "Firmware", "status", Kind::GetOnly,
+    ImageVersion => "image-version", 4, "Image version", "image", Kind::Enum(&[("v0", 0), ("v1", 1)]),
     FrameRate => "frame-rate", 5, "Frame rate", "video", Kind::Enum(&[("25", 25), ("30", 30), ("50", 50), ("60", 60)]),
     Resolution => "resolution", 6, "Resolution", "video", Kind::Enum(&[("auto", 0), ("4k", 1), ("1080p", 2), ("720p", 3)]),
     Brightness => "brightness", 7, "Brightness", "image", Kind::Int { min: 0, max: 100 },
@@ -176,7 +177,6 @@ impl SetPayload {
 pub const S3_UNSUPPORTED: &[ParamId] = &[
     ParamId::Hue,
     ParamId::Gamma,
-    ParamId::Zoom,
     ParamId::LensDetail,
     ParamId::MicType,
     ParamId::AudioVolume,
@@ -230,6 +230,10 @@ pub fn tab_group(tab: &str) -> &'static str {
 pub fn fill_order(group: &str) -> Vec<usize> {
     let mut out = Vec::new();
     let mut seen = vec![false; PARAMS.len()];
+    // CID_SCENE is set-only; a GET can stall S3 fill.
+    if let Some(i) = PARAMS.iter().position(|p| p.id == ParamId::ImageVersion) {
+        seen[i] = true;
+    }
     for &id in WARM {
         if let Some(i) = PARAMS.iter().position(|p| p.id == id) {
             if !seen[i] {
@@ -259,6 +263,7 @@ pub fn refresh_order(group: &str) -> Vec<usize> {
         .enumerate()
         .filter(|(_, p)| p.group == group)
         .filter(|(_, p)| p.id != ParamId::LensDetail)
+        .filter(|(_, p)| p.id != ParamId::ImageVersion)
         .filter(|(_, p)| !matches!(p.kind, Kind::WbOffset))
         .filter(|(_, p)| group == "status" || !matches!(p.kind, Kind::GetOnly))
         .map(|(i, _)| i)
@@ -613,6 +618,18 @@ pub fn zoom_raw(mult: f64) -> u32 {
     ((mult + 2.125) / 0.0625).round().clamp(50.0, 98.0) as u32
 }
 
+/// S3 ePTZ crop: centred square of size `1/multiplier` in the unit frame.
+pub fn zoom_rect(raw: u32) -> crate::pb::RectF {
+    let m = zoom_mult(raw).clamp(1.0, 4.0);
+    let size = (1.0 / m) as f32;
+    box_at(0.5, 0.5, size)
+}
+
+pub fn zoom_raw_from_rect(r: crate::pb::RectF) -> u32 {
+    let size = r.w.min(r.h).clamp(0.25, 1.0);
+    zoom_raw(1.0 / f64::from(size))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{kind_for_cid, parse_set, pick_primary_face, Kind, ParamId, SetPayload};
@@ -631,6 +648,8 @@ mod tests {
         }
         assert!(ParamId::parse("color-style").is_none());
         assert!(ParamId::parse("focus-enhance").is_none());
+        assert_eq!(ParamId::parse("image-version"), Some(ParamId::ImageVersion));
+        assert_eq!(ParamId::ImageVersion.spec().cid, 4);
     }
 
     #[test]
@@ -655,6 +674,20 @@ mod tests {
             parse_set(p, &json!({"name": "wb-offset", "value": {"r": 1, "b": 2}})).unwrap();
         assert_eq!(nested, SetPayload::Wb { r: 1, b: 2 });
         assert!(p.kind.settable());
+    }
+
+    #[test]
+    fn parse_set_image_version() {
+        let p = ParamId::ImageVersion.spec();
+        assert_eq!(
+            parse_set(p, &json!({"name": "image-version", "value": "v0"})).unwrap(),
+            SetPayload::Int(0)
+        );
+        assert_eq!(
+            parse_set(p, &json!({"name": "image-version", "value": "1"})).unwrap(),
+            SetPayload::Int(1)
+        );
+        assert_eq!(super::encode_named(p, "v1").unwrap(), 1);
     }
 
     #[test]
@@ -714,6 +747,9 @@ mod tests {
             .unwrap();
         assert!(iso < vol && zoom < vol && focus < vol);
         assert!(order.iter().any(|&i| super::PARAMS[i].group == "audio"));
+        assert!(order
+            .iter()
+            .all(|&i| super::PARAMS[i].id != ParamId::ImageVersion));
     }
 
     #[test]
@@ -782,6 +818,19 @@ mod tests {
         assert!(r.x + r.w <= 1.0001);
         assert!(r.y + r.h <= 1.0001);
         assert!((r.w - 0.10).abs() < 1e-5);
+    }
+
+    #[test]
+    fn zoom_rect_is_centred_crop() {
+        let wide = super::zoom_rect(50);
+        assert!((wide.w - 1.0).abs() < 1e-5);
+        assert!((wide.h - 1.0).abs() < 1e-5);
+        assert!((wide.x - 0.0).abs() < 1e-5);
+        let tele = super::zoom_rect(98);
+        assert!((tele.w - 0.25).abs() < 1e-4);
+        assert!((tele.x - 0.375).abs() < 1e-4);
+        assert_eq!(super::zoom_raw_from_rect(tele), 98);
+        assert_eq!(super::zoom_raw_from_rect(wide), 50);
     }
 
     #[test]

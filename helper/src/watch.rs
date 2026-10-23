@@ -21,7 +21,7 @@ use yolocam::cmd::Cmd;
 use yolocam::discover::{self, Discovery, Inventory, Model};
 use yolocam::params::{self, Param, ParamId, SetPayload};
 use yolocam::pb;
-use yolocam::preview::Preview;
+use yolocam::preview::{self, Preview};
 use yolocam::usbwatch::PlugWatch;
 use yolocam::{Error, Result};
 
@@ -121,6 +121,7 @@ struct Session {
     last_fill: Instant,
     last_covered: Option<bool>,
     unsupported: Vec<ParamId>,
+    s3_zoom: u32,
 }
 
 impl Session {
@@ -143,6 +144,7 @@ impl Session {
             last_fill: Instant::now(),
             last_covered: None,
             unsupported,
+            s3_zoom: 50,
         }
     }
 }
@@ -452,6 +454,9 @@ impl Watch {
             .is_some_and(|p| p.started.elapsed() > p.body.rpc_timeout());
         if timed_out {
             if let Some(p) = s.rpc.pending.take() {
+                if p.name == "peek" {
+                    write_peek(p.cid, 0, &serde_json::json!("timeout"));
+                }
                 if let Some(ev) = set_timeout_event(&p) {
                     emit_cam(&s.disc, ev);
                 }
@@ -472,6 +477,16 @@ impl Watch {
         if s.rpc.pending.is_some() {
             return;
         }
+        if model == Model::S3 {
+            if let Some(q) = s.rpc.queued.as_mut() {
+                if q.name == "zoom" {
+                    if let Some(wire) = q.body.set_wire() {
+                        s.s3_zoom = wire;
+                        q.body = SetPayload::Rect(params::zoom_rect(wire));
+                    }
+                }
+            }
+        }
         let Some(mut c) = s.client.take() else {
             return;
         };
@@ -490,14 +505,21 @@ impl Watch {
                 match send {
                     Ok(seq) => {
                         if let Some(r) = q.body.set_rect() {
-                            emit_cam(
-                                &s.disc,
-                                serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}),
-                            );
-                            emit_cam(
-                                &s.disc,
-                                serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}),
-                            );
+                            if q.name == "zoom" {
+                                emit_cam(
+                                    &s.disc,
+                                    serde_json::json!({"event":"param","name":"zoom","cid":13,"resp":0,"value": params::zoom_raw_from_rect(r)}),
+                                );
+                            } else {
+                                emit_cam(
+                                    &s.disc,
+                                    serde_json::json!({"event":"param","name": q.name, "cid": q.cid, "resp": 0, "value": {"x": r.x, "y": r.y, "w": r.w, "h": r.h}}),
+                                );
+                                emit_cam(
+                                    &s.disc,
+                                    serde_json::json!({"event":"focus-area","rects":[{"x": r.x, "y": r.y, "w": r.w, "h": r.h}]}),
+                                );
+                            }
                         }
                         if let Some((wr, wb)) = q.body.set_wb() {
                             emit_cam(
@@ -520,6 +542,16 @@ impl Watch {
                     }
                     Err(e) => Some(e),
                 }
+            }
+            Some(SendKind::Get(p)) if p.id == ParamId::Zoom && model == Model::S3 => {
+                s.fill.commit();
+                s.last_fill = Instant::now();
+                emit_s3_zoom(&s.disc, s.s3_zoom);
+                None
+            }
+            Some(SendKind::Get(p)) if p.id == ParamId::ImageVersion => {
+                s.fill.commit();
+                None
             }
             Some(SendKind::Get(_)) if hold_gets && !s.fill.is_urgent() => None,
             Some(SendKind::Get(p)) if s.unsupported.contains(&p.id) => {
@@ -809,6 +841,30 @@ impl Watch {
                     )))
                 }
             }
+            Cmd::Peek { cid } => {
+                let s = self
+                    .slot_mut(model)
+                    .ok_or(Error::Disconnected("disconnected"))?;
+                if s.rpc.pending.is_some() {
+                    return Err(Error::Busy);
+                }
+                let c = s
+                    .client
+                    .as_mut()
+                    .ok_or(Error::Disconnected("disconnected"))?;
+                if !c.pace_ready() || c.write_pending() {
+                    return Err(Error::Busy);
+                }
+                let seq = c.begin_get(cid)?;
+                s.rpc.pending = Some(Pending {
+                    seq,
+                    name: "peek",
+                    cid,
+                    started: Instant::now(),
+                    body: RpcBody::Get,
+                });
+                Ok(None)
+            }
             Cmd::Reconnect => {
                 if let Some(s) = self.slot_mut(model) {
                     s.rpc.clear();
@@ -971,15 +1027,36 @@ fn dispatch(
                 *pending = None;
                 if msg.resp_code == 100 && matches!(body, RpcBody::Get) {
                     if let Some(id) = ParamId::parse(name) {
-                        if !unsupported.contains(&id) {
+                        if id != ParamId::ImageVersion && !unsupported.contains(&id) {
                             unsupported.push(id);
                         }
                     }
                 }
+                if name == "zoom" && disc.model == Model::S3 {
+                    let raw = body
+                        .set_rect()
+                        .map(params::zoom_raw_from_rect)
+                        .or_else(|| body.set_wire())
+                        .unwrap_or(50);
+                    emit_cam(
+                        disc,
+                        serde_json::json!({"event":"param","name":"zoom","cid":13,"resp":200,"value": raw}),
+                    );
+                    continue;
+                }
                 let value = set_param_value(name, body.set_wire(), &msg);
+                if name == "peek" {
+                    write_peek(cid, msg.resp_code, &value);
+                }
+                let resp = if name == "image-version" && msg.resp_code == 100 && matches!(body, RpcBody::Get)
+                {
+                    0
+                } else {
+                    msg.resp_code
+                };
                 emit_cam(
                     disc,
-                    serde_json::json!({"event":"param","name": name, "cid": cid, "resp": msg.resp_code, "value": value}),
+                    serde_json::json!({"event":"param","name": name, "cid": cid, "resp": resp, "value": value}),
                 );
                 if let Some(r) = body.set_rect() {
                     if cid == params::FOCUS_AREA_CID || cid == params::FOCUS_TARGET_CID {
@@ -1233,6 +1310,19 @@ impl Fill {
             false
         }
     }
+}
+
+fn write_peek(cid: u32, resp: u32, value: &serde_json::Value) {
+    let path = preview::runtime_dir().join("peek.json");
+    let body = serde_json::json!({"cid": cid, "resp": resp, "value": value});
+    let _ = std::fs::write(path, body.to_string());
+}
+
+fn emit_s3_zoom(disc: &Discovery, raw: u32) {
+    emit_cam(
+        disc,
+        serde_json::json!({"event":"param","name":"zoom","cid":13,"resp":200,"value": raw}),
+    );
 }
 
 fn set_param_value(

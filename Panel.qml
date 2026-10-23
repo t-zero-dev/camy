@@ -62,10 +62,6 @@ Item {
     var all = Model.TABS
     var out = []
     for (var i = 0; i < all.length; i++) {
-      if (all[i].id === "zoom") {
-        var s7 = String(service.selectedModel) === "s7"
-        if (!s7 && !service.paramOk("zoom")) continue
-      }
       if (all[i].id === "audio" && String(service.selectedModel) === "s3") continue
       out.push({ value: all[i].id, label: all[i].label })
     }
@@ -663,14 +659,19 @@ Item {
               width: root.portraitPreview ? Math.round(parent.height * 9 / 16) : parent.width
               height: parent.height
               clip: true
+              readonly property real zoom: {
+                if (String(service.selectedModel) !== "s3") return 1
+                var m = Model.zoomMult(root.val("zoom", 50))
+                return Math.max(1, Math.min(4, m))
+              }
 
             Image {
               id: previewA
               anchors.centerIn: parent
-              width: root.portraitPreview ? parent.height : parent.width
-              height: root.portraitPreview ? parent.width : parent.height
+              width: (root.portraitPreview ? parent.height : parent.width) * viewBox.zoom
+              height: (root.portraitPreview ? parent.width : parent.height) * viewBox.zoom
               rotation: root.portraitPreview ? 90 : 0
-              transform: Scale { origin.x: previewA.width / 2; origin.y: previewA.height / 2; xScale: 1; yScale: root.previewFlipV ? -1 : 1 }
+              transform: Scale { origin.x: previewA.width / 2; origin.y: previewA.height / 2; yScale: root.previewFlipV ? -1 : 1 }
               fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
@@ -684,10 +685,10 @@ Item {
             Image {
               id: previewB
               anchors.centerIn: parent
-              width: root.portraitPreview ? parent.height : parent.width
-              height: root.portraitPreview ? parent.width : parent.height
+              width: (root.portraitPreview ? parent.height : parent.width) * viewBox.zoom
+              height: (root.portraitPreview ? parent.width : parent.height) * viewBox.zoom
               rotation: root.portraitPreview ? 90 : 0
-              transform: Scale { origin.x: previewB.width / 2; origin.y: previewB.height / 2; xScale: 1; yScale: root.previewFlipV ? -1 : 1 }
+              transform: Scale { origin.x: previewB.width / 2; origin.y: previewB.height / 2; yScale: root.previewFlipV ? -1 : 1 }
               fillMode: Image.PreserveAspectFit
               asynchronous: true
               cache: false
@@ -1103,7 +1104,7 @@ Item {
     if (hasVal("shutter-us"))
       rows.push({ label: Model.shutterLabel(val("shutter-us", 0)), tip: "Shutter speed." })
     if (service.paramOk("zoom") && hasVal("zoom"))
-      rows.push({ label: Model.zoomLabel(val("zoom", 50)), tip: "Optical zoom." })
+      rows.push({ label: Model.zoomLabel(val("zoom", 50)), tip: String(service.selectedModel) === "s3" ? "Digital zoom." : "Optical zoom." })
     if (hasVal("focus-mode"))
       rows.push({ label: focusModeName(val("focus-mode", 4)), tip: "Focus mode." })
     return rows
@@ -1825,6 +1826,7 @@ Item {
   Component {
     id: imageTab
     CardGrid {
+      EnumRow { title: "Image version"; name: "image-version"; fallback: "0"; options: [{value:"0",label:"V0"},{value:"1",label:"V1"}] }
       SliderRow { title: "Sharpness"; name: "sharpness"; minimum: -10; maximum: 30 }
       SliderRow { title: "Contrast"; name: "contrast" }
       SliderRow { title: "Saturation"; name: "saturation" }

@@ -15,6 +15,7 @@ pub enum Cmd {
     Heartbeat,
     Preview { on: bool },
     Reconnect,
+    Peek { cid: u32 },
 }
 
 impl Cmd {
@@ -45,6 +46,16 @@ impl Cmd {
             "heartbeat" => Ok(Self::Heartbeat),
             "preview" => Ok(Self::Preview { on: json_on(v) }),
             "reconnect" => Ok(Self::Reconnect),
+            "peek" => {
+                let cid = v
+                    .get("cid")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| Error::Invalid("cid".into()))?;
+                if cid == 0 || cid > 255 || matches!(cid, 29 | 55 | 58) {
+                    return Err(Error::Invalid("cid blocked".into()));
+                }
+                Ok(Self::Peek { cid: cid as u32 })
+            }
             _ => Err(Error::Invalid(format!("unknown cmd {cmd}"))),
         }
     }
@@ -79,6 +90,11 @@ mod tests {
     fn parse_unknown_cmd_fails() {
         assert!(Cmd::parse(&json!({"cmd": "explode"})).is_err());
         assert!(Cmd::parse(&json!({})).is_err());
+        assert!(Cmd::parse(&json!({"cmd": "peek", "cid": 29})).is_err());
+        assert_eq!(
+            Cmd::parse(&json!({"cmd": "peek", "cid": 95})).unwrap(),
+            Cmd::Peek { cid: 95 }
+        );
     }
 
     #[test]
@@ -87,6 +103,22 @@ mod tests {
             Cmd::parse(&json!({"cmd": "set", "name": "color-style", "value": "1"})).unwrap_err();
         assert!(err.to_string().contains("unknown color-style"));
         assert!(Cmd::parse(&json!({"cmd": "set", "name": "focus-enhance", "value": "1"})).is_err());
+        let ver = Cmd::parse(&json!({"cmd": "set", "name": "image-version", "value": "v1"})).unwrap();
+        assert_eq!(
+            ver,
+            Cmd::Set {
+                param: ParamId::ImageVersion,
+                payload: SetPayload::Int(1)
+            }
+        );
+        let v0 = Cmd::parse(&json!({"cmd": "set", "name": "image-version", "value": "0"})).unwrap();
+        assert_eq!(
+            v0,
+            Cmd::Set {
+                param: ParamId::ImageVersion,
+                payload: SetPayload::Int(0)
+            }
+        );
     }
 
     #[test]

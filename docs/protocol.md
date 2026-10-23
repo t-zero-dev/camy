@@ -80,7 +80,8 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 | saturation | 10 | image | int 0–100 |
 | hue | 11 | image | int 0–100 |
 | gamma | 12 | image | int 0–100 |
-| zoom | 13 | zoom | int 50–98 (`mult = 0.0625 × raw − 2.125`) |
+| image-version | 4 | image | enum v0=0 / v1=1 (Compose colour profile; CID_SCENE). Set-only; GET is not sent. |
+| zoom | 13 | zoom | int 50–98 (`mult = 0.0625 × raw − 2.125`). S7 optical via CID 13 Int. S3 4× digital ePTZ: SET is a centred crop rect (`w=h=1/mult`); the panel also scales the preview. |
 | exposure-mode | 14 | exposure | enum auto / manual |
 | ev | 15 | exposure | int 0–16 (8 is 0 EV) |
 | anti-flicker | 16 | exposure | enum off / 50hz / 60hz |
@@ -141,9 +142,9 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 
 The S3 reports `resp_code` 100 (or is unused) for several S7 controls. The helper emits a `caps` event so the panel hides those rows. The current hide list:
 
-hue, gamma, zoom, lens-detail, mic-type, audio volume/denoise/delay/AGC, HDMI format/colour, brightness, distortion, CLUT / LUT mix.
+hue, gamma, lens-detail, mic-type, audio volume/denoise/delay/AGC, HDMI format/colour, brightness, distortion, CLUT / LUT mix.
 
-The Audio tab is hidden on S3 (no line/mic jack). Zoom tab is hidden when zoom is unsupported. 16:9 / 9:16 in the panel is a **preview-only** rotate; it is not a CID. Orientation must not be written as a SET.
+The Audio tab is hidden on S3 (no line/mic jack). Zoom is on both bodies: S7 optical (CID 13 Int), S3 4× digital ePTZ (CID 13 Rect crop plus preview scale). Image version (V0 warm / V1 cool) is CID 4. 16:9 / 9:16 in the panel is a **preview-only** rotate; it is not a CID. Orientation must not be written as a SET.
 
 Aperture on a body without a driven iris is present as GET 200 with a degenerate range; the panel hides the slider when the range is empty.
 

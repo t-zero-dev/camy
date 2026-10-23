@@ -166,6 +166,7 @@ Item {
       connected = true
       control = true
       var name = String(ev.name || "")
+      if (name === "peek") return
       if (ev.error) {
         lastError = Model.plain(ev.error, Model.MAX_ERROR)
         if (pending[name] !== undefined) {
@@ -183,6 +184,7 @@ Item {
           clearPending(name, "Camera did not confirm")
           return
         }
+        if (name === "image-version") return
         var hide = Object.assign({}, unsupported)
         hide[name] = true
         unsupported = hide
@@ -337,7 +339,7 @@ Item {
       return
     }
     var numeric = /^-?\d+(\.\d+)?$/.test(value)
-    var token = /^(on|off|auto|manual|line|mic|face|af-s|af-c)$/i.test(value)
+    var token = /^(on|off|auto|manual|line|mic|face|af-s|af-c|v0|v1)$/i.test(value)
     if (!numeric && !token) {
       lastError = "invalid value"
       return
