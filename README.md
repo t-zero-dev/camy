@@ -1,6 +1,6 @@
 # CamY
 
-The unofficial Omarchy configurator for [YoloLiv](https://www.yololiv.com/) YoloCam **S7** and **S3** — similar to the Compose app on Windows and Mac. Without CamY, Omarchy users who own these brilliant cameras would need to connect to spare Windows or Apple devices just to change camera settings.
+The unofficial Omarchy configurator for [YoloLiv](https://www.yololiv.com/) YoloCam [**S7**](https://www.yololiv.com/yoloCam-s7) and [**S3**](https://www.yololiv.com/yoloCam-s3) — similar to the [Compose](https://www.yololiv.com/compose-app) app on Windows and Mac. Without CamY, Omarchy users who own these brilliant cameras would need to connect to spare Windows or Apple devices just to change camera settings.
 
 CamY is not affiliated with, endorsed by, or sponsored by YoloLiv Inc. YoloCam, YoloLiv, and Compose are trademarks of their owners.
 
@@ -9,8 +9,6 @@ CamY is not affiliated with, endorsed by, or sponsored by YoloLiv Inc. YoloCam, 
 This page is the user guide for installation, first run, and everyday use. Helper build instructions and control-channel parameters live in [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/protocol.md](docs/protocol.md).
 
 Firmware flashing, CLUT colour-wheel upload, and YoloLiv remote assistance are out of scope for now.
-
----
 
 ## Install
 
