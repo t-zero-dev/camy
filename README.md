@@ -1,14 +1,16 @@
 # CamY
 
-Unofficial Omarchy panel for [YoloLiv](https://www.yololiv.com/) YoloCam **S7** and **S3** — the way Compose does on Windows and Mac.
+The unofficial Omarchy configurator for [YoloLiv](https://www.yololiv.com/) YoloCam **S7** and **S3** — similar to the Compose app on Windows and Mac. Without CamY, Omarchy users who own these brilliant cameras would need to connect to spare Windows or Apple devices just to change camera settings.
 
 CamY is not affiliated with, endorsed by, or sponsored by YoloLiv Inc. YoloCam, YoloLiv, and Compose are trademarks of their owners.
 
-A summoned window: live preview on top, two-column setting cards below, drawn in your Omarchy theme. Settings stay on the camera. This plugin is the remote.
+![CamY overview: S7 and S3 side by side](docs/camy-combined.png)
 
-This page is the user guide: install, first run, and everyday use. How the helper is built lives in [CONTRIBUTING.md](CONTRIBUTING.md). Named parameters and the control channel live in [docs/protocol.md](docs/protocol.md).
+This page is the user guide for installation, first run, and everyday use. Helper build instructions and control-channel parameters live in [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/protocol.md](docs/protocol.md).
 
-Out of scope: firmware flashing, CLUT colour-wheel upload, YoloLiv remote assistance.
+Firmware flashing, CLUT colour-wheel upload, and YoloLiv remote assistance are out of scope for now.
+
+---
 
 ## Install
 
@@ -18,7 +20,7 @@ Omarchy 4. Needs [Rust](https://rustup.rs/) to build the helper once. Plugins ru
 omarchy plugin add https://github.com/t-zero-dev/camy.git --enable
 ```
 
-That clones into `~/.config/omarchy/plugins/io.github.t-zero-dev.camy` and enables the **service** (USB + control) and the **window**. Open it from **Apps → CamY**.
+That clones into `~/.config/omarchy/plugins/io.github.t-zero-dev.camy` and enables the **service** (USB + control) and the **window**. Open from **Apps → CamY**.
 
 Then build the helper. Cargo’s `target/` must stay **outside** the plugin tree — `omarchy plugin validate` rejects symlinks:
 
@@ -74,6 +76,8 @@ The glyph is an outline camera until USB shows up, then fills, then accented (bl
 
 If OBS, Meet, or Zoom already holds the UVC node, preview says busy and names the holder when it can. The rest of the window still works.
 
+![Preview busy — in use by Google Meet](docs/camy-busy.png)
+
 With both an S7 and an S3 docked, select the body under the title, or press `[` `]`. A second body of the same model is ignored.
 
 ## The window
@@ -97,11 +101,15 @@ Image has eight cards; on a short laptop window the list scrolls. Tab and arrows
 
 A covered lens paints an overlay on the preview. ISO, shutter, zoom, and focus under the title stay visible. Hover those readouts for a one-line gloss.
 
+![Covered lens overlay on the S7 preview](docs/camy-covered-lens.png)
+
 **AF-S** — click the preview to pick a point.
 
 **AF-C** — Large / Medium / Small, or Custom and drag a box.
 
 **Face** — tracks a face.
+
+![Focus tab with Face selected and a live preview](docs/camy-focus.png)
 
 **Audio on S7** — a wireless receiver belongs on **Line**, not Mic. Volume around 40–50, auto gain off if the transmitter already has gain. Noise cancellation indoors can add grain.
 
