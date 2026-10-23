@@ -116,7 +116,7 @@ SET is only allowed for names in this table. The JSON wire uses the **name** col
 | wb-tone | 105 | wb | int 0–128 |
 | exposure-lock | 106 | exposure | enum off / on |
 | manu-focus | 111 | focus | int 0–100 |
-| zoom-speed | 112 | zoom | int 1–5 (not exposed in the panel) |
+| zoom-speed | 112 | zoom | int 1–5 |
 
 ### Shutter denominators
 

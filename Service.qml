@@ -76,7 +76,18 @@ Item {
       }
       cameras = cams
       glyphCode = Number(ev.glyph || 0)
-      if (ev.selected) selectedModel = String(ev.selected) === "s3" ? "s3" : "s7"
+      if (ev.selected) {
+        var next = String(ev.selected) === "s3" ? "s3" : "s7"
+        if (next !== selectedModel) {
+          unsupported = {}
+          values = {}
+          pending = {}
+          selectedModel = next
+          send({ cmd: "get-all", model: next })
+        } else {
+          selectedModel = next
+        }
+      }
       usb = cameras.length > 0
       if (!usb) {
         connected = false
@@ -93,8 +104,9 @@ Item {
       }
       return
     }
-    if (!eventForSelected(ev) && event !== "discover" && event !== "caps") return
+    if (!eventForSelected(ev) && event !== "discover") return
     if (event === "caps") {
+      if (!eventForSelected(ev)) return
       var hide = {}
       var list = ev.unsupported || []
       for (var i = 0; i < list.length; i++) hide[String(list[i])] = true

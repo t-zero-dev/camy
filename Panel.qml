@@ -62,7 +62,10 @@ Item {
     var all = Model.TABS
     var out = []
     for (var i = 0; i < all.length; i++) {
-      if (all[i].id === "zoom" && !service.paramOk("zoom")) continue
+      if (all[i].id === "zoom") {
+        var s7 = String(service.selectedModel) === "s7"
+        if (!s7 && !service.paramOk("zoom")) continue
+      }
       if (all[i].id === "audio" && String(service.selectedModel) === "s3") continue
       out.push({ value: all[i].id, label: all[i].label })
     }
@@ -1794,6 +1797,7 @@ Item {
         }
       }
       EnumRow { title: "Frame rate"; name: "frame-rate"; options: [{value:"25",label:"25"},{value:"30",label:"30"},{value:"50",label:"50"},{value:"60",label:"60"}] }
+      EnumRow { title: "Resolution"; name: "resolution"; options: [{value:"0",label:"Auto"},{value:"1",label:"4K"},{value:"2",label:"1080p"},{value:"3",label:"720p"}] }
       SettingCard {
         visible: String(service.selectedModel) === "s7"
         title: "Vertical flip"
@@ -1913,6 +1917,7 @@ Item {
         }
       }
       EnumRow { title: "Focus speed"; name: "focus-speed"; options: [{value:"5",label:"Slow"},{value:"3",label:"Medium"},{value:"1",label:"Fast"}] }
+      EnumRow { title: "CAF"; name: "caf"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
       Loader {
         property int cardSpan: 2
         property bool cardSelected: false
@@ -2073,6 +2078,13 @@ Item {
           }
         }
       }
+      SliderRow {
+        title: "Zoom speed"
+        name: "zoom-speed"
+        minimum: 1
+        maximum: 5
+        cardSpan: 2
+      }
     }
   }
 
@@ -2226,6 +2238,7 @@ Item {
       EnumRow { title: "Input"; name: "mic-type"; options: [{value:"0",label:"Line"},{value:"1",label:"Mic"}] }
       EnumRow { title: "Auto gain"; name: "audio-agc"; options: [{value:"0",label:"Off"},{value:"1",label:"On"}] }
       EnumRow { title: "Noise cancellation"; name: "audio-denoise"; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
+      EnumRow { title: "Reverb"; name: "audio-reverb"; options: [{value:"0",label:"Off"},{value:"1",label:"Weak"},{value:"2",label:"Middle"},{value:"3",label:"Strong"}] }
     }
   }
 

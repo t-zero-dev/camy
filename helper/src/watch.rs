@@ -625,13 +625,11 @@ impl Watch {
         ));
         if let Some(s) = self.slot(self.selected) {
             emit_cam(&s.disc, discover_json(&s.disc));
-            if !s.unsupported.is_empty() {
-                let names: Vec<&'static str> = s.unsupported.iter().map(|id| id.as_str()).collect();
-                emit_cam(
-                    &s.disc,
-                    serde_json::json!({"event":"caps","unsupported": names}),
-                );
-            }
+            let names: Vec<&'static str> = s.unsupported.iter().map(|id| id.as_str()).collect();
+            emit_cam(
+                &s.disc,
+                serde_json::json!({"event":"caps","unsupported": names}),
+            );
         }
     }
 
