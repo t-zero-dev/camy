@@ -245,7 +245,7 @@ fn hypr_windows() -> Vec<HyprWin> {
 
 fn is_self_helper(comm: &str, cmdline: &str) -> bool {
     let hay = format!("{comm} {cmdline}").to_ascii_lowercase();
-    hay.contains("yolocam")
+    hay.contains("camy") || hay.contains("yolocam")
 }
 
 fn is_meet(hay: &str) -> bool {
@@ -259,7 +259,7 @@ fn is_meet(hay: &str) -> bool {
 
 pub(crate) fn classify(comm: &str, cmdline: &str, extra: &str) -> (String, &'static str) {
     if is_self_helper(comm, cmdline) {
-        return ("YoloCam helper".into(), "other");
+        return ("CamY helper".into(), "other");
     }
     let hay = format!("{comm} {cmdline} {extra}").to_ascii_lowercase();
     if hay.contains("obs-studio")
@@ -365,6 +365,28 @@ mod tests {
             "Yolocam S7 Omarchy Quickshell Native Configurator - grok",
         );
         assert_eq!(name, "Chromium");
+        assert_eq!(kind, "other");
+    }
+
+    #[test]
+    fn camy_helper_is_self() {
+        let (name, kind) = classify(
+            "camy",
+            "/home/tunde/.config/omarchy/plugins/io.github.t-zero-dev.camy/bin/camy watch",
+            "",
+        );
+        assert_eq!(name, "CamY helper");
+        assert_eq!(kind, "other");
+    }
+
+    #[test]
+    fn leftover_yolocam_helper_is_self() {
+        let (name, kind) = classify(
+            "yolocam",
+            "/home/tunde/.config/omarchy/plugins/io.github.t-zero-dev.camy/bin/yolocam watch",
+            "",
+        );
+        assert_eq!(name, "CamY helper");
         assert_eq!(kind, "other");
     }
 

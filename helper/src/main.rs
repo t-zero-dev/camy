@@ -16,12 +16,12 @@ mod watch;
 use std::io::{self, Read, Write};
 use std::time::Duration;
 
-use yolocam::client::{BlockingClient, Client};
-use yolocam::discover::{self, Discovery};
-use yolocam::params::{self, Kind, ParamId, SetPayload};
-use yolocam::pb;
-use yolocam::preview::Preview;
-use yolocam::{Error, Result};
+use camy::client::{BlockingClient, Client};
+use camy::discover::{self, Discovery};
+use camy::params::{self, Kind, ParamId, SetPayload};
+use camy::pb;
+use camy::preview::Preview;
+use camy::{Error, Result};
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -63,7 +63,7 @@ fn main() {
 
 fn print_help() {
     println!(
-        "yolocam — YoloCam S7/S3 control\n\
+        "camy — CamY helper for YoloCam S7/S3\n\
          \n\
          Commands:\n\
            status              USB, gadget NIC, control port, firmware\n\
@@ -344,8 +344,8 @@ fn apply_set(name: &str, raw: &str) -> Result<()> {
     let disc = discover::discover();
     let mut c = connect(&disc)?;
     let mut msg = c.set(p.cid, wire)?;
-    if matches!(msg.body, yolocam::pb::Body::Empty) {
-        msg.body = yolocam::pb::Body::Int(wire);
+    if matches!(msg.body, camy::pb::Body::Empty) {
+        msg.body = camy::pb::Body::Int(wire);
     }
     ok(param_object(p.name, &msg));
     Ok(())
@@ -390,7 +390,7 @@ fn ctrlc_stub(tx: std::sync::mpsc::Sender<()>) {
 }
 
 fn ctl_path() -> std::path::PathBuf {
-    yolocam::preview::runtime_dir().join("ctl.sock")
+    camy::preview::runtime_dir().join("ctl.sock")
 }
 
 fn cmd_ctl(args: &[String]) -> Result<()> {

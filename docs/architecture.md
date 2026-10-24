@@ -4,8 +4,8 @@ One Omarchy plugin, one helper process, at most two camera sessions.
 
 ```
 Omarchy shell
-  Service.qml  ── spawns ──►  bin/yolocam watch
-  Panel.qml    ── JSON  ──►  stdin / $XDG_RUNTIME_DIR/yolocam/ctl.sock
+  Service.qml  ── spawns ──►  bin/camy watch
+  Panel.qml    ── JSON  ──►  stdin / $XDG_RUNTIME_DIR/camy/ctl.sock
        ▲                         │
        └── JSON-lines events ────┘
                                  │
@@ -24,14 +24,14 @@ Omarchy shell
 | `Service.qml` | Long-lived `Process` running `watch`; applies events into panel state |
 | `Panel.qml` | Summoned FloatingWindow titled CamY |
 | `Model.js` | Shared labels, zoom/EV/shutter formatting |
-| `bin/yolocam` | Release helper |
+| `bin/camy` | Release helper |
 | `helper/` | Rust crate (MIT) |
 
-The shell hot-reloads QML under `~/.config/omarchy/plugins/` on save. Replacing `bin/yolocam` takes effect when watch restarts (the service relaunches it after exit).
+The shell hot-reloads QML under `~/.config/omarchy/plugins/` on save. Replacing `bin/camy` takes effect when watch restarts (the service relaunches it after exit).
 
 ## Watch
 
-`yolocam watch` polls, in one thread:
+`camy watch` polls, in one thread:
 
 - camera TCP (S7 and/or S3)
 - Unix `ctl.sock`
@@ -52,7 +52,7 @@ JSON commands are parsed into `Cmd`. Named SET goes through `ParamId` and `parse
 
 ## Preview
 
-UVC MJPEG is written as ping-pong JPEGs under `$XDG_RUNTIME_DIR/yolocam/<serial>/` (`preview-a.jpg` / `preview-b.jpg` plus a `slot` file). Quickshell `Image` loads a file URL; the helper decodes luma only to decide “lens covered.”
+UVC MJPEG is written as ping-pong JPEGs under `$XDG_RUNTIME_DIR/camy/<serial>/` (`preview-a.jpg` / `preview-b.jpg` plus a `slot` file). Quickshell `Image` loads a file URL; the helper decodes luma only to decide “lens covered.”
 
 `Preview` owns the capture fd. Dropping it closes the fd so a blocking `STREAMON`/`DQBUF` in the worker returns instead of wedging watch. `EBUSY` is reported with the process that holds the node (OBS, Meet, Zoom when those can be named).
 

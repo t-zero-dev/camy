@@ -128,11 +128,11 @@ On Status, Tab stays on **Refresh**. The readout cards are visible and not selec
 
 ## Command line
 
-The service runs `yolocam watch` and **owns** TCP 12345. While the plugin is enabled, talk to that watch. A second `get` / `set` / `probe` / `status` firmware probe opens another client and can stall the camera.
+The service runs `camy watch` and **owns** TCP 12345. While the plugin is enabled, talk to that watch. A second `get` / `set` / `probe` / `status` firmware probe opens another client and can stall the camera.
 
 ```sh
 PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
-BIN="$PLUGIN/bin/yolocam"
+BIN="$PLUGIN/bin/camy"
 ```
 
 Read state from the shell (JSON: `usb`, `control`, `values`, `selected`, …):
@@ -156,7 +156,7 @@ $BIN ctl '{"cmd":"select","model":"s3"}'
 
 `$BIN help` lists the rest. `list` prints every named parameter. Full command table: [docs/cli.md](docs/cli.md).
 
-`yolocam recover` is parked. USB up and control down means power-cycle data **and** power.
+`camy recover` is parked. USB up and control down means power-cycle data **and** power.
 
 ## Assistant
 
@@ -165,13 +165,13 @@ A skill teaches Grok (and other agents) to change ISO, zoom, and focus from spee
 ```sh
 PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
 mkdir -p ~/.grok/skills/camy ~/.agents/skills/camy
-cp "$PLUGIN/skills/yolocam/SKILL.md" ~/.grok/skills/camy/
-cp "$PLUGIN/skills/yolocam/SKILL.md" ~/.agents/skills/camy/
+cp "$PLUGIN/skills/camy/SKILL.md" ~/.grok/skills/camy/
+cp "$PLUGIN/skills/camy/SKILL.md" ~/.agents/skills/camy/
 ```
 
 Then: “make the YoloCam brighter by 20%”, “zoom in a bit”, “switch to face detect”.
 
-The agent uses `omarchy-shell camy state` and `$BIN ctl`. It must not run `yolocam get` / `set` / `status` while the service is up.
+The agent uses `omarchy-shell camy state` and `$BIN ctl`. It must not run `camy get` / `set` / `status` while the service is up.
 
 ## Preferences
 
@@ -219,7 +219,7 @@ Meet as a background Chromium tab is named Chromium, not Google Meet.
 
 S3 preview can take several seconds on STREAMON. Wait before clicking again.
 
-Logs and the control socket live under `$XDG_RUNTIME_DIR/yolocam/` (usually `/run/user/<uid>/yolocam/`).
+Logs and the control socket live under `$XDG_RUNTIME_DIR/camy/` (usually `/run/user/<uid>/camy/`).
 
 More cases (UVC busy, mixed dock, gadget as default route): [docs/troubleshooting.md](docs/troubleshooting.md).
 

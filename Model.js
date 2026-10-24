@@ -61,7 +61,7 @@ function previewFileUrl(path, seq) {
   if (path.indexOf("/tmp/") === 0 || path === "/tmp") return ""
   if (path.indexOf("/var/tmp/") === 0 || path.indexOf("/dev/shm/") === 0) return ""
   if (!/\/preview-[ab]\.jpg$/.test(path)) return ""
-  if (path.indexOf("/yolocam/") === -1) return ""
+  if (path.indexOf("/camy/") === -1) return ""
   return "file://" + path + "?" + seq
 }
 

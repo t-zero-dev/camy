@@ -14,7 +14,7 @@ Talk to the **running watch** only. The Omarchy service owns TCP 12345.
 
 ```bash
 PLUGIN="$HOME/.config/omarchy/plugins/io.github.t-zero-dev.camy"
-BIN="$PLUGIN/bin/yolocam"
+BIN="$PLUGIN/bin/camy"
 ```
 
 ## Do

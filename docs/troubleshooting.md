@@ -4,7 +4,7 @@
 
 `omarchy-shell camy state` (or the panel) shows the camera on USB but TCP `192.168.129.10:12345` or `192.168.126.10:12345` is connection-refused. `live_camera_app` on the camera has stalled.
 
-`yolocam recover` is parked and must not be used. Unplug data **and** power, then plug both back.
+`camy recover` is parked and must not be used. Unplug data **and** power, then plug both back.
 
 Do not loop GET-all or auto-recover on GET timeout. That is what wedges the panel.
 
@@ -20,9 +20,9 @@ UVC is exclusive. OBS, Chromium/Meet, or Zoom holding `/dev/videoN` makes STREAM
 
 Preview is click-to-start and only while the panel is open. S3 STREAMON can take several seconds on the SoC; wait before clicking again. Confirm the widget setting “Live preview when the panel is open” is on.
 
-## Second client / `yolocam status` while the bar is up
+## Second client / `camy status` while the bar is up
 
-Watch holds 12345. A second `get`, `set`, `probe`, or firmware `status` opens another TCP client and can kill `live_camera_app`. Use `yolocam ctl` or the panel. `status` is safe for USB inventory only when it skips the control probe because watch owns the socket.
+Watch holds 12345. A second `get`, `set`, `probe`, or firmware `status` opens another TCP client and can kill `live_camera_app`. Use `camy ctl` or the panel. `status` is safe for USB inventory only when it skips the control probe because watch owns the socket.
 
 ## Mixed S3 + S7
 

@@ -181,7 +181,7 @@ impl Preview {
         let dir2 = dir.clone();
         let _ = fps;
         let thread = thread::Builder::new()
-            .name("yolocam-preview".into())
+            .name("camy-preview".into())
             .spawn(move || {
                 if let Err(e) = run(fd, width, height, &dir2, &stop2) {
                     let _ = write_private(dir2.join("error"), e.to_string().as_bytes());
@@ -234,7 +234,7 @@ pub fn runtime_dir() -> PathBuf {
         }
     }
     if let Some(state) = state.as_ref().filter(|p| p.is_absolute()) {
-        let alt = state.join("yolocam");
+        let alt = state.join("camy");
         if parent_is_safe(state, uid) {
             warn_runtime_fallback();
             return alt;
@@ -244,14 +244,14 @@ pub fn runtime_dir() -> PathBuf {
     chosen
 }
 
-/// Create `$XDG_RUNTIME_DIR/yolocam` (or a 0700 fallback) and restrict it.
+/// Create `$XDG_RUNTIME_DIR/camy` (or a 0700 fallback) and restrict it.
 pub fn ensure_runtime_dir() -> Result<PathBuf> {
     let dir = runtime_dir();
     ensure_private_dir(&dir)?;
     Ok(dir)
 }
 
-/// JPEG ping-pong for one camera: `$XDG_RUNTIME_DIR/yolocam/<serial>/`.
+/// JPEG ping-pong for one camera: `$XDG_RUNTIME_DIR/camy/<serial>/`.
 pub fn ensure_camera_dir(serial: &str) -> Result<PathBuf> {
     let dir = runtime_dir().join(crate::discover::sanitize_id(serial));
     ensure_private_dir(&dir)?;
@@ -374,15 +374,15 @@ fn is_shared_tmp(p: &Path) -> bool {
 pub(crate) fn choose_runtime_dir(xdg: Option<&Path>, state: Option<&Path>, uid: u32) -> PathBuf {
     if let Some(p) = xdg {
         if p.is_absolute() && !is_shared_tmp(p) {
-            return p.join("yolocam");
+            return p.join("camy");
         }
     }
     if let Some(p) = state {
         if p.is_absolute() && !is_shared_tmp(p) {
-            return p.join("yolocam");
+            return p.join("camy");
         }
     }
-    PathBuf::from(format!("/run/user/{uid}/yolocam"))
+    PathBuf::from(format!("/run/user/{uid}/camy"))
 }
 
 /// V4L2 capture nodes only. USB names must not become arbitrary paths
@@ -420,7 +420,7 @@ fn current_uid() -> u32 {
 fn warn_runtime_fallback() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        eprintln!("yolocam: XDG_RUNTIME_DIR missing or invalid; using a 0700 fallback");
+        eprintln!("camy: XDG_RUNTIME_DIR missing or invalid; using a 0700 fallback");
     });
 }
 
@@ -717,17 +717,17 @@ mod tests {
     #[test]
     fn camera_dir_nests_under_runtime() {
         let p = choose_runtime_dir(Some(Path::new("/run/user/1000")), None, 1000);
-        assert_eq!(p, PathBuf::from("/run/user/1000/yolocam"));
+        assert_eq!(p, PathBuf::from("/run/user/1000/camy"));
         assert_eq!(
             p.join("Y-CAM-25360005"),
-            PathBuf::from("/run/user/1000/yolocam/Y-CAM-25360005")
+            PathBuf::from("/run/user/1000/camy/Y-CAM-25360005")
         );
     }
 
     #[test]
     fn prefers_absolute_xdg() {
         let p = choose_runtime_dir(Some(Path::new("/run/user/1000")), None, 1000);
-        assert_eq!(p, PathBuf::from("/run/user/1000/yolocam"));
+        assert_eq!(p, PathBuf::from("/run/user/1000/camy"));
     }
 
     #[test]
@@ -737,13 +737,13 @@ mod tests {
             Some(Path::new("/home/u/.local/state")),
             42,
         );
-        assert_eq!(p, PathBuf::from("/home/u/.local/state/yolocam"));
+        assert_eq!(p, PathBuf::from("/home/u/.local/state/camy"));
     }
 
     #[test]
     fn fallback_without_xdg() {
         let p = choose_runtime_dir(None, None, 7);
-        assert_eq!(p, PathBuf::from("/run/user/7/yolocam"));
+        assert_eq!(p, PathBuf::from("/run/user/7/camy"));
     }
 
     #[test]
@@ -753,9 +753,9 @@ mod tests {
             Some(Path::new("/var/tmp")),
             1000,
         );
-        assert_eq!(p, PathBuf::from("/run/user/1000/yolocam"));
+        assert_eq!(p, PathBuf::from("/run/user/1000/camy"));
         let p = choose_runtime_dir(Some(Path::new("/dev/shm/run")), None, 9);
-        assert_eq!(p, PathBuf::from("/run/user/9/yolocam"));
+        assert_eq!(p, PathBuf::from("/run/user/9/camy"));
     }
 
     #[test]
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn restrict_mode_sets_0700() {
-        let dir = std::env::temp_dir().join(format!("yolocam-mode-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("camy-mode-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         restrict_mode(&dir, 0o700).unwrap();
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
@@ -790,7 +790,7 @@ mod tests {
 
     #[test]
     fn ensure_private_dir_rejects_a_file() {
-        let path = std::env::temp_dir().join(format!("yolocam-notdir-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("camy-notdir-{}", std::process::id()));
         std::fs::write(&path, b"x").unwrap();
         assert!(super::ensure_private_dir(&path).is_err());
         let _ = std::fs::remove_file(&path);
@@ -802,7 +802,7 @@ mod tests {
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .unwrap_or_else(std::env::temp_dir);
-        let outer = sandbox.join(format!("yolocam-priv-{}", std::process::id()));
+        let outer = sandbox.join(format!("camy-priv-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&outer);
         std::fs::create_dir_all(&outer).unwrap();
         restrict_mode(&outer, 0o700).unwrap();

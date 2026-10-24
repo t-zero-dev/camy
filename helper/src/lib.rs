@@ -1,4 +1,4 @@
-//! YoloCam S7/S3 control helper for the Omarchy plugin.
+//! CamY helper for YoloLiv YoloCam S7 and S3.
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 // FFI, protobuf varints, and V4L2 lengths are truncated by construction.

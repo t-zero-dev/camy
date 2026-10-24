@@ -47,7 +47,7 @@ function previewFileUrl(path, seq) {
   if (path.indexOf("/tmp/") === 0 || path === "/tmp") return ""
   if (path.indexOf("/var/tmp/") === 0 || path.indexOf("/dev/shm/") === 0) return ""
   if (!/\/preview-[ab]\.jpg$/.test(path)) return ""
-  if (path.indexOf("/yolocam/") === -1) return ""
+  if (path.indexOf("/camy/") === -1) return ""
   return "file://" + path + "?" + seq
 }
 
@@ -69,11 +69,11 @@ const parsed = parseLine(markup)
 if (parsed.error !== "helper output was not JSON") throw new Error("parseLine echoed raw")
 if (parseLine("x".repeat(MAX_EVENT + 1)).error !== "event too large") throw new Error("no size cap")
 if (previewFileUrl("/etc/passwd", 1) !== "") throw new Error("passwd path")
-if (previewFileUrl("/run/user/1000/yolocam/Y-CAM/preview-a.jpg", 3) !== "file:///run/user/1000/yolocam/Y-CAM/preview-a.jpg?3") throw new Error("good path")
-if (previewFileUrl("/run/user/1000/yolocam/../preview-a.jpg", 1) !== "") throw new Error("dotdot")
+if (previewFileUrl("/run/user/1000/camy/Y-CAM/preview-a.jpg", 3) !== "file:///run/user/1000/camy/Y-CAM/preview-a.jpg?3") throw new Error("good path")
+if (previewFileUrl("/run/user/1000/camy/../preview-a.jpg", 1) !== "") throw new Error("dotdot")
 if (previewFileUrl("https://evil/preview-a.jpg", 1) !== "") throw new Error("remote")
-if (previewFileUrl("/tmp/yolocam-1000/cam/preview-b.jpg", 2) !== "") throw new Error("tmp fallback")
-if (previewFileUrl("/var/tmp/yolocam/cam/preview-a.jpg", 1) !== "") throw new Error("var tmp")
+if (previewFileUrl("/tmp/camy-1000/cam/preview-b.jpg", 2) !== "") throw new Error("tmp fallback")
+if (previewFileUrl("/var/tmp/camy/cam/preview-a.jpg", 1) !== "") throw new Error("var tmp")
 if (plain("\x1b[31mred\x1b[0m", 200) !== "red") throw new Error("ansi")
 if (plain("\x1b]8;;https://evil.example/\x07text", 200) !== "text") throw new Error("osc")
 if (plain("a\u202eb", 200) !== "ab") throw new Error("bidi")

@@ -16,14 +16,14 @@ const GET_RPC_TIMEOUT: Duration = Duration::from_millis(400);
 const SET_RPC_TIMEOUT: Duration = Duration::from_millis(2500);
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
-use yolocam::client::Client;
-use yolocam::cmd::Cmd;
-use yolocam::discover::{self, Discovery, Inventory, Model};
-use yolocam::params::{self, Param, ParamId, SetPayload};
-use yolocam::pb;
-use yolocam::preview::{self, Preview};
-use yolocam::usbwatch::PlugWatch;
-use yolocam::{Error, Result};
+use camy::client::Client;
+use camy::cmd::Cmd;
+use camy::discover::{self, Discovery, Inventory, Model};
+use camy::params::{self, Param, ParamId, SetPayload};
+use camy::pb;
+use camy::preview::{self, Preview};
+use camy::usbwatch::PlugWatch;
+use camy::{Error, Result};
 
 use super::{connect_watch, ctl_path, emit};
 
@@ -166,13 +166,13 @@ pub fn run() -> Result<()> {
 
 impl Watch {
     fn open() -> Result<Self> {
-        let _dir = yolocam::preview::ensure_runtime_dir()?;
-        let _ = yolocam::preview::harden_runtime_tree();
+        let _dir = camy::preview::ensure_runtime_dir()?;
+        let _ = camy::preview::harden_runtime_tree();
         let sock_path = ctl_path();
         let _ = std::fs::remove_file(&sock_path);
         let listener = UnixListener::bind(&sock_path).map_err(|e| Error::io_ctx(e, "ctl.sock"))?;
         listener.set_nonblocking(true).ok();
-        yolocam::preview::restrict_mode(&sock_path, 0o700)?;
+        camy::preview::restrict_mode(&sock_path, 0o700)?;
 
         let plugs = PlugWatch::new();
         let usb_fallback = if plugs.is_some() {
@@ -826,8 +826,8 @@ impl Watch {
                                 serde_json::json!({"event":"preview","on": true, "device": dev, "dir": dir, "size": "1280x720"}),
                             )))
                         }
-                        Err(yolocam::Error::Busy) => {
-                            let holder = yolocam::holders::summarize(&dev);
+                        Err(camy::Error::Busy) => {
+                            let holder = camy::holders::summarize(&dev);
                             Ok(Some(tagged(
                                 &s.disc,
                                 serde_json::json!({"event":"preview","on": false, "error": "busy", "holder": holder.name, "holderKind": holder.kind}),
@@ -1221,7 +1221,7 @@ fn drain_preview(s: &mut Session) {
         if let Some(e) = read_small(&p.dir.join("error"), 512) {
             let err = e.trim().to_string();
             let holder = if err == "busy" {
-                s.disc.video.as_deref().map(yolocam::holders::summarize)
+                s.disc.video.as_deref().map(camy::holders::summarize)
             } else {
                 None
             };
@@ -1380,7 +1380,7 @@ fn json_norm_rect(v: &serde_json::Value) -> Result<pb::RectF> {
 mod tests {
     use super::{Fill, RpcBody};
     use std::time::{Duration, Instant};
-    use yolocam::params::{self, Kind, SetPayload};
+    use camy::params::{self, Kind, SetPayload};
 
     #[test]
     fn refresh_queues_open_tab_only() {
@@ -1488,7 +1488,7 @@ mod tests {
             name: "focus-area",
             cid: 24,
             started: Instant::now(),
-            body: RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF {
+            body: RpcBody::Set(SetPayload::Rect(camy::pb::RectF {
                 x: 0.2,
                 y: 0.2,
                 w: 0.3,
@@ -1531,7 +1531,7 @@ mod tests {
     #[test]
     fn rpc_body_flags_cannot_diverge() {
         assert!(RpcBody::Set(SetPayload::Int(1)).timeout_is_error());
-        assert!(!RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF::default())).timeout_is_error());
+        assert!(!RpcBody::Set(SetPayload::Rect(camy::pb::RectF::default())).timeout_is_error());
         assert!(!RpcBody::Get.timeout_is_error());
         assert_eq!(
             RpcBody::Set(SetPayload::Int(1)).rpc_timeout(),
@@ -1541,7 +1541,7 @@ mod tests {
         assert!(super::SET_RPC_TIMEOUT > super::GET_RPC_TIMEOUT);
         assert_eq!(RpcBody::Set(SetPayload::Int(9)).set_wire(), Some(9));
         assert!(
-            RpcBody::Set(SetPayload::Rect(yolocam::pb::RectF::default()))
+            RpcBody::Set(SetPayload::Rect(camy::pb::RectF::default()))
                 .set_wire()
                 .is_none()
         );

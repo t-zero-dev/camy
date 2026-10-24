@@ -1,9 +1,9 @@
 [package]
-name = "yolocam"
+name = "camy"
 version = "0.2.0"
 edition = "2021"
 license = "MIT"
-description = "YoloCam S7/S3 control helper for the Omarchy plugin"
+description = "CamY helper for YoloLiv YoloCam S7 and S3"
 
 [features]
 default = []

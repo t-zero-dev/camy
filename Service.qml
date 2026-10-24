@@ -388,7 +388,7 @@ Item {
 
 
 
-  readonly property string helperBin: Model.helperPathFromUrl(Qt.resolvedUrl("bin/yolocam"))
+  readonly property string helperBin: Model.helperPathFromUrl(Qt.resolvedUrl("bin/camy"))
 
   function startWatch() {
     if (!active || watchProcess.running) return

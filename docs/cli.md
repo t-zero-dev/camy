@@ -1,12 +1,12 @@
 # Helper CLI
 
-`bin/yolocam` talks to a docked S7 or S3 over the Yunxi control port. The CamY service runs `yolocam watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
+`bin/camy` talks to a docked S7 or S3 over the Yunxi control port. The CamY service runs `camy watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
 
-Use `yolocam ctl` or `omarchy-shell camy …` against a running watch. Close the window / stop the service before a second TCP client.
+Use `camy ctl` or `omarchy-shell camy …` against a running watch. Close the window / stop the service before a second TCP client.
 
 ```bash
 PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
-BIN="$PLUGIN/bin/yolocam"
+BIN="$PLUGIN/bin/camy"
 $BIN help
 ```
 
@@ -39,7 +39,7 @@ omarchy-shell shell hide io.github.t-zero-dev.camy
 
 ### ctl
 
-Forward a JSON command to a running watch (`$XDG_RUNTIME_DIR/yolocam/ctl.sock`). This is the daily CLI while the plugin is enabled.
+Forward a JSON command to a running watch (`$XDG_RUNTIME_DIR/camy/ctl.sock`). This is the daily CLI while the plugin is enabled.
 
 ```bash
 $BIN ctl set iso 400

@@ -11,14 +11,14 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin
 | Path | Role |
 | --- | --- |
 | `manifest.json` | Plugin id `io.github.t-zero-dev.camy`, kinds `service` + `panel` |
-| `Service.qml` | Long-lived `yolocam watch`; IPC target `camy` |
+| `Service.qml` | Long-lived `camy watch`; IPC target `camy` |
 | `Panel.qml` | FloatingWindow title `CamY`, implicit size 720×1220, minimum 720×720 |
 | `Model.js` | Tab ids, zoom/EV/shutter labels |
-| `bin/yolocam` | Release helper (gitignored; you build it) |
-| `helper/` | Rust sources (crate name `yolocam`) |
+| `bin/camy` | Release helper (gitignored; you build it) |
+| `helper/` | Rust sources (crate name `camy`) |
 | `scripts/write-desktop-entry.sh` | Optional launcher entry |
 | `scripts/build-helper.sh` | Release helper into user cache, then `bin/` |
-| `skills/yolocam/SKILL.md` | Source copy of the agent skill |
+| `skills/camy/SKILL.md` | Source copy of the agent skill |
 | `docs/` | This tree |
 
 `Panel.qml` sizes the window. Hyprland’s size rule, if present, applies on map and wins for the first frame.
@@ -103,7 +103,7 @@ Written by `scripts/write-desktop-entry.sh`. Exec is `omarchy-shell shell toggle
 
 | Copy from | Copy to |
 | --- | --- |
-| `plugins/io.github.t-zero-dev.camy/skills/yolocam/SKILL.md` | `~/.grok/skills/camy/SKILL.md` |
+| `plugins/io.github.t-zero-dev.camy/skills/camy/SKILL.md` | `~/.grok/skills/camy/SKILL.md` |
 | same | `~/.agents/skills/camy/SKILL.md` |
 
 The plugin does not install these copies itself.
@@ -114,15 +114,15 @@ The camera’s CDC interface is a `/24` used only for TCP 12345. If NetworkManag
 
 ## Runtime (not config)
 
-`$XDG_RUNTIME_DIR/yolocam/` (usually `/run/user/<uid>/yolocam/`):
+`$XDG_RUNTIME_DIR/camy/` (usually `/run/user/<uid>/camy/`):
 
 | File | Role |
 | --- | --- |
-| `ctl.sock` | Watch control socket (`yolocam ctl`) |
+| `ctl.sock` | Watch control socket (`camy ctl`) |
 | `<serial>/preview-a.jpg`, `preview-b.jpg` | Ping-pong MJPEG for the panel |
 | `<serial>/slot` | Which JPEG the panel should load |
 
-These vanish at logout. They are not preferences. The directory is still named `yolocam` because the helper crate is.
+These vanish at logout. They are not preferences.
 
 ## Stored on the camera
 
