@@ -17,6 +17,7 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin
 | `bin/yolocam` | Release helper (gitignored; you build it) |
 | `helper/` | Rust sources (crate name `yolocam`) |
 | `scripts/write-desktop-entry.sh` | Optional launcher entry |
+| `scripts/build-helper.sh` | Release helper into user cache, then `bin/` |
 | `skills/yolocam/SKILL.md` | Source copy of the agent skill |
 | `docs/` | This tree |
 
@@ -131,7 +132,7 @@ SET of a named parameter persists on the body (ISO, white balance, HDMI format, 
 
 | Variable | Value |
 | --- | --- |
-| `CARGO_TARGET_DIR` | `/tmp/camy-target` (or any path **outside** the plugin folder) |
+| `CARGO_TARGET_DIR` | `${XDG_CACHE_HOME:-$HOME/.cache}/camy/target` (mode 700, via `scripts/build-helper.sh`) |
 | `PATH` | include `~/.cargo/bin` |
 
 ## What the plugin will not write

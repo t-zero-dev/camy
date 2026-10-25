@@ -79,4 +79,4 @@ Glyph code is internal inventory: 0 none, 3 S3, 7 S7, 10 both. The bar draws col
 | `recover` | Telnet restart of `live_camera_app` |
 | `holders` | Who has the UVC node open |
 
-Build with `CARGO_TARGET_DIR` outside the plugin tree. Clippy: `deny(clippy::all)`, `warn(clippy::pedantic)`.
+Build with `scripts/build-helper.sh` so `CARGO_TARGET_DIR` is `${XDG_CACHE_HOME:-$HOME/.cache}/camy/target`, outside the plugin tree. Clippy: `deny(clippy::all)`, `warn(clippy::pedantic)`.

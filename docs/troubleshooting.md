@@ -46,12 +46,11 @@ Only named parameters are SET. CID 55, 58, and 29 are not in that table; writing
 
 ```bash
 PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
-export CARGO_TARGET_DIR=/tmp/camy-target
+export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/camy/target"
 cd "$PLUGIN/helper"
 cargo test
-cargo build --release
-cp /tmp/camy-target/release/yolocam "$PLUGIN/bin/yolocam.new"
-mv -f "$PLUGIN/bin/yolocam.new" "$PLUGIN/bin/yolocam"
+cd "$PLUGIN"
+bash scripts/build-helper.sh
 omarchy plugin validate "$PLUGIN"
 ```
 

@@ -20,20 +20,14 @@ omarchy plugin add https://github.com/t-zero-dev/camy.git --enable
 
 That clones into `~/.config/omarchy/plugins/io.github.t-zero-dev.camy` and enables the **service** (USB + control) and the **window**. Open from **Apps → CamY**.
 
-Then build the helper. Cargo’s `target/` must stay **outside** the plugin tree — `omarchy plugin validate` rejects symlinks:
+Then build the helper. Cargo’s `target/` must stay **outside** the plugin tree — `omarchy plugin validate` rejects symlinks — and must be a directory you own, not shared `/tmp`:
 
 ```sh
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
-export PATH="$HOME/.cargo/bin:$PATH"
-export CARGO_TARGET_DIR=/tmp/camy-target
-cd "$PLUGIN/helper"
-cargo build --release
-cp /tmp/camy-target/release/yolocam "$PLUGIN/bin/yolocam.new"
-mv -f "$PLUGIN/bin/yolocam.new" "$PLUGIN/bin/yolocam"
+bash ~/.config/omarchy/plugins/io.github.t-zero-dev.camy/scripts/build-helper.sh
 omarchy restart shell
 ```
 
-The helper binary is still named `yolocam`. Do not `cp` onto a running copy (`ETXTBSY`). Use `yolocam.new` then `mv -f`.
+The script builds into `${XDG_CACHE_HOME:-$HOME/.cache}/camy/target` (mode 700), checks that the cargo output is a user-owned regular file, then installs with `*.new` then `mv -f` so a running helper is not overwritten (`ETXTBSY`). The crate name in `helper/Cargo.toml` is the installed binary name.
 
 Optional: list CamY in the Omarchy menu:
 
