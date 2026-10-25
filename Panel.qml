@@ -21,6 +21,8 @@ Item {
   property string tab: "exposure"
   property string previewOrientation: "16:9"
   property bool previewFlipV: false
+  property string previewFlipChip: "0"
+  onPreviewFlipVChanged: previewFlipChip = previewFlipV ? "1" : "0"
   readonly property bool portraitPreview: previewOrientation === "9:16"
   property bool cursorActive: false
   property bool cameraSwitchPending: false
@@ -113,6 +115,7 @@ Item {
         g.selectedIndex = 0
         if (typeof g.applySelection === "function") g.applySelection()
       }
+      if (keyCatcher && !root.editingBox) keyCatcher.forceActiveFocus()
     })
   }
 
@@ -280,9 +283,19 @@ Item {
     return tabLoader && tabLoader.item ? tabLoader.item : null
   }
 
+  function keepKeys() {
+    if (!keyCatcher || root.editingBox !== null) return
+    keyCatcher.forceActiveFocus()
+    Qt.callLater(function() {
+      if (keyCatcher && root.editingBox === null)
+        keyCatcher.forceActiveFocus()
+    })
+  }
+
   function moveCard(delta) {
     var g = currentGrid()
     if (g && typeof g.moveSelect === "function") g.moveSelect(delta)
+    keepKeys()
   }
 
   function flickableOf(scroll) {
@@ -312,6 +325,7 @@ Item {
         flick.contentY = Math.max(0, Math.min(maxY, y0 - margin))
       else if (y1 > flick.contentY + viewH - margin)
         flick.contentY = Math.max(0, Math.min(maxY, y1 - viewH + margin))
+      keepKeys()
       return
     }
     var bar = scrollArea.ScrollBar.vertical
@@ -364,7 +378,18 @@ Item {
   function nudgeCard(dir, big) {
     if (!guardEdit()) return
     var c = selectedCard()
-    if (c && typeof c.nudge === "function") c.nudge(dir, !!big)
+    if (!c) {
+      keepKeys()
+      return
+    }
+    if (c.title === "Vertical flip") {
+      root.previewFlipV = dir > 0
+    } else if (typeof c.sliderNudge === "function") {
+      c.sliderNudge(dir, !!big)
+    } else if (typeof c.nudge === "function") {
+      c.nudge(dir, !!big)
+    }
+    keepKeys()
   }
 
   function activateCard() {
@@ -426,6 +451,7 @@ Item {
     onVisibleChanged: {
       if (visible) {
         root.opened = true
+        Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
         return
       }
       root.opened = false
@@ -433,12 +459,33 @@ Item {
         root.shell.hide("io.github.t-zero-dev.camy")
     }
 
+    readonly property bool keysLive: visible && root.opened && root.editingBox === null
+    // Arrow/hjkl shortcuts fire even if a child holds focus. Tab stays on
+    // Keys.onPressed so Ctrl+Tab is not stolen by the widget focus chain.
+    Shortcut { enabled: window.keysLive; context: Qt.WindowShortcut; sequences: ["Up", "K"]; onActivated: root.moveCard(-1) }
+    Shortcut { enabled: window.keysLive; context: Qt.WindowShortcut; sequences: ["Down", "J"]; onActivated: root.moveCard(1) }
+    Shortcut { enabled: window.keysLive; context: Qt.WindowShortcut; sequences: ["Left", "H"]; onActivated: root.nudgeCard(-1, false) }
+    Shortcut { enabled: window.keysLive; context: Qt.WindowShortcut; sequences: ["Right", "L"]; onActivated: root.nudgeCard(1, false) }
+    Shortcut { enabled: window.keysLive; context: Qt.WindowShortcut; sequence: "Shift+Left"; onActivated: root.nudgeCard(-1, true) }
+    Shortcut { enabled: window.keysLive; context: Qt.WindowShortcut; sequence: "Shift+Right"; onActivated: root.nudgeCard(1, true) }
+
     Item {
       id: keyCatcher
       anchors.fill: parent
       focus: true
+      activeFocusOnTab: true
       Keys.priority: Keys.BeforeItem
       readonly property bool blocked: root.editingBox !== null
+
+      function isNavKey(event) {
+        var k = event.key
+        return k === Qt.Key_Tab || k === Qt.Key_Backtab
+      }
+
+      Keys.onShortcutOverride: function(event) {
+        if (blocked) return
+        if (isNavKey(event)) event.accepted = true
+      }
 
       Keys.onPressed: function(event) {
         var ctrl = !!(event.modifiers & Qt.ControlModifier)
@@ -492,26 +539,6 @@ Item {
         }
         if (event.key === Qt.Key_BracketRight || event.text === "]") {
           root.cycleCamera(1)
-          event.accepted = true
-          return
-        }
-        if (event.key === Qt.Key_Down || event.key === Qt.Key_J || event.text === "j") {
-          root.moveCard(1)
-          event.accepted = true
-          return
-        }
-        if (event.key === Qt.Key_Up || event.key === Qt.Key_K || event.text === "k") {
-          root.moveCard(-1)
-          event.accepted = true
-          return
-        }
-        if (event.key === Qt.Key_Right || event.key === Qt.Key_L || event.text === "l") {
-          root.nudgeCard(1, shift)
-          event.accepted = true
-          return
-        }
-        if (event.key === Qt.Key_Left || event.key === Qt.Key_H || event.text === "h") {
-          root.nudgeCard(-1, shift)
           event.accepted = true
           return
         }
@@ -895,6 +922,7 @@ Item {
               accent: Color.accent
               fontFamily: root.fontFamily
               fontSize: Style.font.caption
+              focusable: false
               onChanged: function(v) { root.tab = v }
             }
           }
@@ -905,8 +933,16 @@ Item {
             Layout.fillHeight: true
             clip: true
             padding: 0
+            focusPolicy: Qt.NoFocus
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            Component.onCompleted: {
+              var flick = contentItem
+              if (flick && flick.keyNavigationEnabled !== undefined)
+                flick.keyNavigationEnabled = false
+              if (flick && flick.activeFocusOnTab !== undefined)
+                flick.activeFocusOnTab = false
+            }
 
             Column {
               id: panelColumn
@@ -1333,12 +1369,12 @@ Item {
         }
         return null
       }
-      return walk(extraColumn)
+      return walk(extraColumn) || walk(inner) || walk(card)
     }
 
     function nudge(dir, big) {
-      if (typeof sliderNudge === "function") {
-        sliderNudge(dir, big)
+      if (typeof card.sliderNudge === "function") {
+        card.sliderNudge(dir, big)
         return
       }
       var g = findGroup()
@@ -1353,8 +1389,8 @@ Item {
     }
 
     function activateCard() {
-      if (typeof sliderActivate === "function") {
-        sliderActivate()
+      if (typeof card.sliderActivate === "function") {
+        card.sliderActivate()
         return
       }
       var g = findGroup()
@@ -1362,11 +1398,11 @@ Item {
     }
 
     function focusField() {
-      if (typeof sliderFocusField === "function") sliderFocusField()
+      if (typeof card.sliderFocusField === "function") card.sliderFocusField()
     }
 
     function typeDigit(t) {
-      if (typeof sliderTypeDigit === "function") sliderTypeDigit(t)
+      if (typeof card.sliderTypeDigit === "function") card.sliderTypeDigit(t)
     }
 
     onCardSelectedChanged: {
@@ -1531,6 +1567,24 @@ Item {
     property var fallback: options.length ? options[0].value : ""
     visible: service.paramOk(name)
 
+    function sliderNudge(dir, big) {
+      void big
+      if (!root.guardEdit()) return
+      var opts = erow.options
+      if (!opts || !opts.length) return
+      var cur = String(root.val(erow.name, erow.fallback))
+      var i = 0
+      for (var n = 0; n < opts.length; n++) {
+        var ov = (opts[n] && typeof opts[n] === "object") ? String(opts[n].value) : String(opts[n])
+        if (ov === cur) { i = n; break }
+      }
+      var next = i + dir
+      if (next < 0) next = opts.length - 1
+      if (next >= opts.length) next = 0
+      var v = (opts[next] && typeof opts[next] === "object") ? String(opts[next].value) : String(opts[next])
+      root.setParam(erow.name, v)
+    }
+
     Item {
       width: parent.width
       height: egroup.implicitHeight
@@ -1665,8 +1719,14 @@ Item {
         horizontalAlignment: TextInput.AlignHCenter
         selectByMouse: true
         clip: true
+        activeFocusOnTab: false
+        readOnly: root.editingBox !== box
         maximumLength: 16
         text: srow.formatLive(Number(root.val(srow.name, srow.minimum)))
+        onActiveFocusChanged: {
+          if (activeFocus && root.editingBox !== box)
+            Qt.callLater(root.keepKeys)
+        }
         onEditingFinished: {
           var n = srow.parseLive(text)
           if (n === null || n === undefined || isNaN(n)) {
@@ -1804,6 +1864,7 @@ Item {
             background: Color.popups.background
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
+            focusable: false
             onChanged: function(v) { if (root.guardEdit()) root.previewOrientation = v }
           }
         }
@@ -1818,12 +1879,17 @@ Item {
             id: flipGroup
             anchors.horizontalCenter: parent.horizontalCenter
             options: [{ value: "0", label: "Off" }, { value: "1", label: "On" }]
-            value: root.previewFlipV ? "1" : "0"
+            value: root.previewFlipChip
             foreground: root.foreground
             background: Color.popups.background
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            onChanged: function(v) { if (root.guardEdit()) root.previewFlipV = v === "1" }
+            focusable: false
+            onChanged: function(v) {
+              if (!root.guardEdit()) return
+              root.previewFlipV = v === "1"
+              root.previewFlipChip = v
+            }
           }
         }
       }
@@ -1864,6 +1930,7 @@ Item {
           background: Color.popups.background
           fontFamily: root.fontFamily
           fontSize: Style.font.caption
+          focusable: false
           onChanged: function(v) { root.setAfcShape(v) }
         }
       }
@@ -1902,6 +1969,7 @@ Item {
             background: Color.popups.background
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
+            focusable: false
             onHovered: function(index, on) {
               var tips = [root.focusModeTip(1), root.focusModeTip(2), root.focusModeTip(3), root.focusModeTip(4)]
               root.focusHoverTip = on && index >= 0 && index < tips.length ? tips[index] : ""
@@ -1998,8 +2066,14 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             horizontalAlignment: TextInput.AlignHCenter
+            activeFocusOnTab: false
+            readOnly: root.editingBox !== zbox
             maximumLength: 16
             text: Model.zoomMult(root.val("zoom", 50)).toFixed(1)
+            onActiveFocusChanged: {
+              if (activeFocus && root.editingBox !== zbox)
+                Qt.callLater(root.keepKeys)
+            }
             onEditingFinished: {
               var n = Number(text)
               if (isNaN(n)) { text = Model.zoomMult(root.val("zoom", 50)).toFixed(1); return }
