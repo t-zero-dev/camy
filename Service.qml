@@ -361,7 +361,6 @@ Item {
   }
 
   function refresh() {
-    if (!usb) return
     applyStatus = "Refreshing…"
     refreshWatchdog.restart()
     send({ cmd: "refresh", model: selectedModel })

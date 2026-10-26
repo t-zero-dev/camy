@@ -1,4 +1,4 @@
-//! One `poll` over camera TCP, ctl socket, stdin, and USB inotify.
+//! One `poll` over camera TCP, ctl socket, stdin, and USB hotplug.
 //! Idle GET is a pending RPC, not a blocking walk.
 //!
 //! At most one S7 and one S3 session. Commands without `model`/`id` hit the
@@ -742,6 +742,7 @@ impl Watch {
                 Ok(None)
             }
             Cmd::Refresh => {
+                self.sync_inventory(true);
                 if let Some(s) = self.slot_mut(model) {
                     s.rpc.pending = None;
                     s.fill.refresh();
