@@ -19,12 +19,14 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin
 | `helper/release.pin` | Pinned GitHub Release tag, asset names, sha256 |
 | `run.sh` | `--ensure` / `--print-path` bootstrap |
 | `scripts/fetch-helper.sh` | Download, hash, install under `$XDG_DATA_HOME/camy/bin` |
-| `scripts/write-desktop-entry.sh` | Optional launcher entry |
+| `scripts/write-desktop-entry.sh` | Apps launcher entry (run from `run.sh --ensure`) |
+| `scripts/install-window-rules.sh` | Copy `hypr/camy.lua` into `~/.config/hypr/` and require it |
+| `hypr/camy.lua` | Float, centre, size, Super+T recentre |
 | `scripts/build-helper.sh` | Checkout helper into user cache, then `bin/` |
 | `skills/camy/SKILL.md` | Source copy of the agent skill |
 | `docs/` | This tree |
 
-`Panel.qml` sizes the window. Hyprland’s size rule, if present, applies on map and wins for the first frame.
+`Panel.qml` sizes the window. Hyprland’s size rule applies on map; the panel also float/resize/centre on open.
 
 ### Plugin settings object
 
@@ -54,41 +56,19 @@ To disable preview from config:
 { "id": "io.github.t-zero-dev.camy", "preview": false }
 ```
 
-### Window — `~/.config/hypr/hyprland.lua`
+### Window — `~/.config/hypr/camy.lua`
 
-The plugin never writes Hyprland. Recommended rules, title match `^CamY`, class `org.quickshell`:
-
-```lua
-o.window({ title = "^CamY" }, { float = true })
-o.window({ title = "^CamY" }, { center = true })
-o.window({ title = "^CamY" }, { size = "720 min(1220, monitor_h*0.90)" })
-o.window({ title = "^CamY" }, { suppress_event = "fullscreen maximize" })
-```
+`run.sh --ensure` copies [hypr/camy.lua](../hypr/camy.lua) to `~/.config/hypr/camy.lua` and appends a `pcall(require, "hypr.camy")` block to `hyprland.lua` if it is missing. Title match `^CamY`, class `org.quickshell`. Do not tag CamY `+floating-window`; that size is 875×600 and would override 720×1220.
 
 | Rule | Why |
 | --- | --- |
-| `float` | Stays a card window. Tag `+floating-window` forces 875×600 and overrides size. |
+| `float` | Stays a card window. |
 | `center` | Opens in the middle of the monitor, below the bar reserved area. |
-| `size` | Width 720. Height 1220 on a tall dock, 90% of logical `monitor_h` on a short laptop. Expressions must not contain spaces inside `min(…)`. |
+| `size` | Width 720. Height 1220 on a tall dock, 90% of logical `monitor_h` on a short laptop. |
 | `suppress_event` | Fullscreen and maximize are ignored. Resize by edges remains. |
+| Super+T | Other windows still toggle tile. CamY only recentres. |
 
-Size is a static map rule. `hyprctl reload`, then close and reopen CamY.
-
-Optional: Super+T on this window recentres and keeps float, while other windows still toggle tile. That is a local override of Omarchy’s Super+T, not a plugin file.
-
-```lua
-hl.unbind("SUPER + T")
-o.bind("SUPER + T", "Toggle window floating/tiling", function()
-  local w = hl.get_active_window()
-  local title = w and tostring(w.title or "") or ""
-  if title:find("^CamY") then
-    hl.dispatch(hl.dsp.window.float({ action = "set", window = w }))
-    hl.dispatch(hl.dsp.window.center({ window = w }))
-    return
-  end
-  hl.dispatch(hl.dsp.window.float({ action = "toggle" }))
-end)
-```
+The panel also float/resize/centre on open so the first frame is right before Hyprland reloads.
 
 ### Keybind — `~/.config/hypr/bindings.lua`
 
@@ -152,6 +132,7 @@ SET of a named parameter persists on the body (ISO, white balance, HDMI format, 
 ## What the plugin will not write
 
 - `~/.config/hypr/bindings.lua`
-- `~/.config/hypr/hyprland.lua`
 - `~/.config/omarchy/shell.json` except through `omarchy plugin add/remove`
 - `~/.config/camy/`
+
+`run.sh --ensure` does write `~/.config/hypr/camy.lua` and, if missing, a `camy-window-rules` require block at the end of `hyprland.lua`.

@@ -10,6 +10,7 @@ cargo test --locked
 cargo clippy --all-targets --locked -- -D clippy::all
 cd ..
 bash tests/fetch-helper.sh
+bash tests/install-window-rules.sh
 bash scripts/build-helper.sh
 omarchy plugin validate ..
 omarchy restart shell

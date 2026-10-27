@@ -42,6 +42,7 @@ jobs:
           cargo clippy --manifest-path helper/Cargo.toml --all-targets --locked -- -D clippy::all
           cargo test --manifest-path helper/Cargo.toml --locked
           bash tests/fetch-helper.sh
+          bash tests/install-window-rules.sh
   native-arm:
     name: Platform aarch64
     uses: ./.github/workflows/native.yml

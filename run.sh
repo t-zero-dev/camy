@@ -23,11 +23,17 @@ case ${1:-} in
   *) die "Usage: bash run.sh [--ensure|--print-path]" ;;
 esac
 
+install_desktop_and_window() {
+  bash scripts/write-desktop-entry.sh >/dev/null || true
+  bash scripts/install-window-rules.sh >/dev/null || true
+}
+
 if [[ $ensure == 1 ]]; then
   if [[ -n ${CAMY_BOOTSTRAP_LOG:-} ]]; then
     mkdir -p "$(dirname "$CAMY_BOOTSTRAP_LOG")"
     exec 2> "$CAMY_BOOTSTRAP_LOG"
   fi
+  trap install_desktop_and_window EXIT
   if [[ -n $selected_helper ]]; then
     [[ $print_path == 1 ]] && printf '%s\n' "$selected_helper"
     exit 0

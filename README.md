@@ -18,32 +18,13 @@ Omarchy 4 on x86_64 and aarch64. Plugins run unsandboxed inside `omarchy-shell`;
 omarchy plugin add https://github.com/t-zero-dev/camy.git --enable
 ```
 
-That clones the plugin, enables the **service** (USB + control) and the **window**, and on first open downloads the pinned helper from GitHub Releases, checks its sha256, and installs it under `~/.local/share/camy/bin`. Open from **Apps → CamY**.
+That clones the plugin, enables the **service** (USB + control) and the **window**, and on first open downloads the pinned helper from GitHub Releases, checks its sha256, and installs it under `~/.local/share/camy/bin`. The same bootstrap writes the Apps launcher entry and Hyprland rules so the window opens floating, centred, and 720×min(1220, 90% of the monitor). Super+T still toggles float for other windows; on CamY it only recentres. Open from **Apps → CamY**.
 
-Optional: list CamY in the Omarchy menu:
-
-```sh
-bash ~/.config/omarchy/plugins/io.github.t-zero-dev.camy/scripts/write-desktop-entry.sh
-```
-
-Optional: a Hyprland key. Add one line to `~/.config/hypr/bindings.lua`. This plugin never writes that file. Example, Super+Shift+C:
+Optional: a Hyprland key. Add one line to `~/.config/hypr/bindings.lua`. Example, Super+Shift+C:
 
 ```lua
 o.bind("SUPER + SHIFT + C", "CamY", "omarchy-shell shell toggle io.github.t-zero-dev.camy '{}'")
 ```
-
-Recommended: keep the window floating, centred, and right-sized as you switch between laptop and dock. Add this to `~/.config/hypr/hyprland.lua`. This plugin never writes that file either:
-
-```lua
-o.window({ title = "^CamY" }, { float = true })
-o.window({ title = "^CamY" }, { center = true })
-o.window({ title = "^CamY" }, { size = "720 min(1220, monitor_h*0.90)" })
-o.window({ title = "^CamY" }, { suppress_event = "fullscreen maximize" })
-```
-
-`monitor_h` is logical pixels. On a 1800×1125 laptop that is 720×1012; on a 3200×1800 dock it stays 720×1220. After editing Hyprland, `hyprctl reload` then close and reopen CamY.
-
-If Super+T tiles windows, you can leave CamY floating by recentring it instead of toggling tile. That override lives in your Hyprland config, next to the size rule.
 
 Configs inside the plugin and outside it are listed in [docs/configuration.md](docs/configuration.md).
 
@@ -218,11 +199,11 @@ More cases (UVC busy, mixed dock, gadget as default route): [docs/troubleshootin
 ```sh
 omarchy plugin remove io.github.t-zero-dev.camy
 rm -rf ~/.local/share/camy ~/.cache/camy
-rm -f ~/.local/share/applications/camy.desktop
+rm -f ~/.local/share/applications/camy.desktop ~/.config/hypr/camy.lua
 rm -rf ~/.grok/skills/camy ~/.agents/skills/camy
 ```
 
-Then delete the `o.bind` line and the `o.window({ title = "^CamY" }, …)` rules if you added them. The Super+T recentre override is yours to keep or drop.
+If `~/.config/hypr/hyprland.lua` still has a `camy-window-rules` block, delete that block. Super+T then returns to Omarchy’s default toggle.
 
 ## Hardware
 

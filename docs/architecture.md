@@ -27,7 +27,9 @@ Omarchy shell
 | `Model.js` | Shared labels, zoom/EV/shutter formatting |
 | `bin/camy` | Checkout helper (gitignored) |
 | `helper/release.pin` | Pinned GitHub Release |
-| `run.sh` | Bootstrap: local binary or fetch |
+| `run.sh` | Bootstrap: local binary or fetch; desktop entry and Hyprland rules |
+| `hypr/camy.lua` | Default float, centre, size, Super+T recentre |
+| `scripts/install-window-rules.sh` | Copy `hypr/camy.lua` into `~/.config/hypr` and require it |
 | `helper/` | Rust crate (MIT) |
 
 The shell hot-reloads QML under `~/.config/omarchy/plugins/` on save. Replacing the helper takes effect when watch restarts (the service relaunches it after exit).

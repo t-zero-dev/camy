@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -119,12 +120,28 @@ Item {
     })
   }
 
+  function placeWindow() {
+    var mon = Hyprland.focusedMonitor
+    var ipc = mon && mon.lastIpcObject ? mon.lastIpcObject : null
+    var scale = ipc && ipc.scale ? Number(ipc.scale) : 1
+    if (!(scale > 0)) scale = 1
+    var ph = ipc && ipc.height ? Number(ipc.height) : (mon ? Number(mon.height) : 0)
+    var logicalH = ph > 0 ? Math.floor(ph / scale) : 1220
+    var h = Math.min(1220, Math.floor(logicalH * 0.90))
+    if (h < 720) h = 720
+    var sel = "title:^CamY$"
+    Hyprland.dispatch('hl.dsp.window.float({ action = "set", window = "' + sel + '" })')
+    Hyprland.dispatch('hl.dsp.window.resize({ x = 720, y = ' + h + ', window = "' + sel + '" })')
+    Hyprland.dispatch('hl.dsp.window.center({ window = "' + sel + '" })')
+  }
+
   function open(payloadJson) {
     closingFromHost = false
     opened = true
     Qt.callLater(function() {
       if (root.opened && keyCatcher) keyCatcher.forceActiveFocus()
     })
+    placeRetry.restart()
   }
 
   function close() {
@@ -141,6 +158,13 @@ Item {
   function requestClose() {
     if (shell && typeof shell.hide === "function") shell.hide("io.github.t-zero-dev.camy")
     else close()
+  }
+
+  Timer {
+    id: placeRetry
+    interval: 50
+    repeat: false
+    onTriggered: root.placeWindow()
   }
 
   function switchPanel(_direction) {}
@@ -452,6 +476,7 @@ Item {
       if (visible) {
         root.opened = true
         Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+        root.placeRetry.restart()
         return
       }
       root.opened = false
