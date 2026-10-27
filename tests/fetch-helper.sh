@@ -70,9 +70,30 @@ fi
 grep -q 'sha256 mismatch' "$work/err" || die "mismatch did not name sha256"
 [[ ! -e $want ]] || die "mismatch left a dest file"
 
+# An oversized local asset is refused before copy (4 MiB cap).
+big=$work/big.bin
+dd if=/dev/zero of="$big" bs=1024 count=4097 status=none
+export CAMY_HELPER_ASSET=$big
+if bash scripts/fetch-helper.sh --print-path >/dev/null 2>"$work/err-big"; then
+  die "accepted an oversized helper asset"
+fi
+grep -q 'exceeds' "$work/err-big" || die "oversize refusal did not name the cap"
+[[ ! -e $want ]] || die "oversize left a dest file"
+export CAMY_HELPER_ASSET=$asset
+
+# A parent symlink into /tmp is refused.
+tmptarget=$(mktemp -d /tmp/camy-fetch-test.XXXXXX)
+trap 'rm -rf "$work" "$tmptarget"' EXIT
+rm -rf -- "$data/camy"
+ln -s -- "$tmptarget" "$data/camy"
+if bash scripts/fetch-helper.sh --print-path >/dev/null 2>"$work/err-link"; then
+  die "followed a data-home camy symlink into /tmp"
+fi
+grep -q 'shared tmp' "$work/err-link" || die "symlink-tmp refusal did not name shared tmp"
+rm -f -- "$data/camy"
+
 # Shared tmp as data home is refused.
 export XDG_DATA_HOME=/tmp
-export CAMY_HELPER_ASSET=$asset
 if bash scripts/fetch-helper.sh --print-path >/dev/null 2>"$work/err2"; then
   die "installed into /tmp"
 fi

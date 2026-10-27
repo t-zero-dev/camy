@@ -29,7 +29,7 @@ read_helper_pin() {
     esac
   done < "$file"
   [[ -n $tag && -n $repo && ${#assets[@]} -gt 0 ]] || die "Incomplete pin in $file"
-  [[ $tag == helper-* ]] || die "Pin tag in $file must be helper-<version>"
+  [[ $tag =~ ^helper-[A-Za-z0-9._-]+$ ]] || die "Pin tag in $file must be helper-<version> without path"
   [[ $repo == t-zero-dev/camy ]] || die "Pin repo in $file must be t-zero-dev/camy"
   for arch in x86_64 aarch64; do
     [[ -n ${assets[$arch]:-}${hashes[$arch]:-} ]] || continue

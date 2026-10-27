@@ -387,10 +387,10 @@ Item {
 
 
 
-  // Plugin bootstrap (run.sh --ensure): install the pinned helper if
-  // needed. Detached so a plugin reload mid-install cannot kill the
-  // download. A checkout with bin/camy stays offline. argv, never shell
-  // text; env -C because Quickshell cwd may be qrc:/qs-blackhole.
+  // Plugin bootstrap (run.sh --print-path): hashed dest only. A Process
+  // so unload/disable can stop it. argv, never shell text; env -C because
+  // Quickshell cwd may be qrc:/qs-blackhole. Inherited CAMY_HELPER_*
+  // overrides are stripped.
   readonly property string pluginRoot: {
     var p = Model.helperPathFromUrl(Qt.resolvedUrl("run.sh"))
     if (p.length > 6 && p.substring(p.length - 6) === "run.sh")
@@ -408,61 +408,100 @@ Item {
   }
   readonly property string bootstrapLog: runtimeDir + "/bootstrap.log"
   property string helperBin: ""
+  property int bootstrapAttempts: 0
   property bool watchSawStart: false
   property string loadedVersion: ""
   property string installedVersion: ""
   readonly property bool updatePending: !!loadedVersion && !!installedVersion && installedVersion !== loadedVersion
 
-  function bootstrap() {
-    if (!active) return
+  function pinnedHelperPath() {
     var home = Quickshell.env("HOME") || ""
-    if (!home) return
-    Quickshell.execDetached(["env", "-C", home, "CAMY_BOOTSTRAP_LOG=" + bootstrapLog, "bash", pluginRoot + "/run.sh", "--ensure"])
+    var data = Quickshell.env("XDG_DATA_HOME") || ""
+    if (!data) data = home + "/.local/share"
+    return data + "/camy/bin/camy"
+  }
+
+  function helperPathAllowed(p) {
+    if (!p || p.charAt(0) !== "/" || p.indexOf("\n") !== -1) return false
+    if (p.indexOf("/tmp/") === 0 || p === "/tmp") return false
+    if (p.indexOf("/var/tmp/") === 0 || p === "/var/tmp") return false
+    if (p.indexOf("/dev/shm/") === 0 || p === "/dev/shm") return false
+    if (p === pinnedHelperPath()) return true
+    if (p === pluginRoot + "/bin/camy") return true
+    return false
+  }
+
+  function bootstrap() {
     resolveHelper()
   }
 
   function resolveHelper() {
-    if (resolveProcess.running) return
+    if (!active || resolveProcess.running) return
     var home = Quickshell.env("HOME") || ""
     if (!home) return
-    resolveProcess.command = ["env", "-C", home, "CAMY_BOOTSTRAP_LOG=" + bootstrapLog, "bash", pluginRoot + "/run.sh", "--print-path"]
+    resolveProcess.command = [
+      "env", "-C", home,
+      "-u", "CAMY_HELPER_BINARY",
+      "-u", "CAMY_HELPER_URL",
+      "-u", "CAMY_HELPER_PIN",
+      "-u", "CAMY_HELPER_ASSET",
+      "-u", "CAMY_HELPER_MACHINE",
+      "CAMY_BOOTSTRAP_LOG=" + bootstrapLog,
+      "bash", pluginRoot + "/run.sh", "--print-path"
+    ]
     resolveProcess.running = true
   }
 
   function startWatch() {
     if (!active || watchProcess.running) return
-    if (!helperBin) {
-      bootstrap()
-      return
-    }
-    watchProcess.command = [helperBin, "watch"]
-    watchProcess.running = true
+    resolveHelper()
   }
 
   function stopWatch() {
     if (watchProcess.running) watchProcess.running = false
   }
 
+  function stopBootstrap() {
+    bootstrapRetry.stop()
+    if (resolveProcess.running) resolveProcess.running = false
+  }
+
   Component.onCompleted: {
     bootstrap()
     startWatch()
   }
-  Component.onDestruction: stopWatch()
-  onActiveChanged: active ? startWatch() : stopWatch()
+  Component.onDestruction: {
+    stopBootstrap()
+    stopWatch()
+  }
+  onActiveChanged: {
+    if (active) startWatch()
+    else {
+      stopBootstrap()
+      stopWatch()
+    }
+  }
 
   Process {
     id: resolveProcess
     running: false
     stdout: StdioCollector { waitForEnd: true }
     onExited: function (exitCode) {
+      if (!root.active) return
       if (exitCode === 0) {
         var p = String(stdout.text || "").trim()
-        if (p.charAt(0) === "/" && p.indexOf("\n") === -1) {
+        if (root.helperPathAllowed(p)) {
           root.helperBin = p
-          root.startWatch()
+          root.bootstrapAttempts = 0
+          if (!watchProcess.running) {
+            watchProcess.command = [p, "watch"]
+            watchProcess.running = true
+          }
           return
         }
       }
+      if (root.bootstrapAttempts >= 3) return
+      root.bootstrapAttempts += 1
       bootstrapRetry.restart()
     }
   }

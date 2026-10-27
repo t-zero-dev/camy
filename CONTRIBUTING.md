@@ -11,12 +11,14 @@ cargo clippy --all-targets --locked -- -D clippy::all
 cd ..
 bash tests/fetch-helper.sh
 bash tests/install-window-rules.sh
+bash tests/write-desktop-entry.sh
+bash tests/run-ensure.sh
 bash scripts/build-helper.sh
 omarchy plugin validate ..
 omarchy restart shell
 ```
 
-`scripts/build-helper.sh` owns the checkout install (`*.new` then `mv -f`) so a running helper is not overwritten (`ETXTBSY`). Do not copy out of `/tmp`. A checkout with `bin/camy` stays offline; marketplace users get the pinned GitHub Release via `run.sh --ensure`.
+`scripts/build-helper.sh` owns the checkout install (`*.new` then `mv -f`) so a running helper is not overwritten (`ETXTBSY`). Do not copy out of `/tmp`. Marketplace bootstrap always uses the hashed dest under `$XDG_DATA_HOME/camy/bin`. A checkout `bin/camy` is used only with `CAMY_USE_LOCAL_HELPER=1`.
 
 Do not bump [helper/release.pin](helper/release.pin) until the named GitHub Release exists and its asset is verified. [docs/RELEASING.md](docs/RELEASING.md) is the sequence.
 

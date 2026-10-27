@@ -24,8 +24,13 @@ for arch in x86_64 aarch64; do
   asset=camy-helper-$arch-unknown-linux-gnu
   url=https://github.com/$repo/releases/download/$tag/$asset
   dest=$work/$asset
-  curl -fsSL --retry 2 -A "camy/$tag (https://github.com/t-zero-dev/camy)" -o "$dest" -- "$url" \
+  curl -fsSL --proto https --proto-redir https \
+    --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 30 \
+    --max-filesize 4194304 \
+    -A "camy/$tag (https://github.com/t-zero-dev/camy)" -o "$dest" -- "$url" \
     || die "Could not download $url. Publish GitHub Release $tag first."
+  sz=$(stat -c %s -- "$dest")
+  [[ $sz -gt 0 && $sz -lt 4194304 ]] || die "$asset exceeds 4 MiB cap or is empty"
   [[ $(head -c 4 "$dest") == $'\x7fELF' ]] || die "$asset is not an ELF executable"
   sum=$(sha256sum -- "$dest" | awk '{print $1}')
   printf 'asset_%s=%s\n' "$arch" "$asset" >> "$pin"

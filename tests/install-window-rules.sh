@@ -36,6 +36,13 @@ if CAMY_HYPR_DIR=/tmp bash scripts/install-window-rules.sh >/dev/null 2>"$work/e
 fi
 grep -q 'shared tmp' "$work/err" || die "tmp refusal did not name shared tmp"
 
+# A hypr dir that is a symlink into /tmp is refused.
+ln -s /tmp "$work/hypr-tmp-link"
+if CAMY_HYPR_DIR=$work/hypr-tmp-link bash scripts/install-window-rules.sh >/dev/null 2>"$work/err-link"; then
+  die "followed a hypr dir symlink into /tmp"
+fi
+grep -q 'shared tmp' "$work/err-link" || die "hypr symlink-tmp refusal did not name shared tmp"
+
 # A symlink dest is refused.
 linkdir=$work/linkhypr
 mkdir -p "$linkdir"

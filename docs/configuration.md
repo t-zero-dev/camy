@@ -18,7 +18,7 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin
 | `helper/` | Rust sources (crate name `camy`) |
 | `helper/release.pin` | Pinned GitHub Release tag, asset names, sha256 |
 | `run.sh` | `--ensure` / `--print-path` bootstrap |
-| `scripts/fetch-helper.sh` | Download, hash, install under `$XDG_DATA_HOME/camy/bin` |
+| `scripts/fetch-helper.sh` | HTTPS download (≤4 MiB, 30 s), sha256, install under `$XDG_DATA_HOME/camy/bin` |
 | `scripts/write-desktop-entry.sh` | Apps launcher entry (run from `run.sh --ensure`) |
 | `scripts/install-window-rules.sh` | Copy `hypr/camy.lua` into `~/.config/hypr/` and require it |
 | `hypr/camy.lua` | Float, centre, size, Super+T recentre |

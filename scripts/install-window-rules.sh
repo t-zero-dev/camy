@@ -14,6 +14,10 @@ hypr_dir=${CAMY_HYPR_DIR:-$HOME/.config/hypr}
 case $hypr_dir in
   /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*) die "hypr dir $hypr_dir is shared tmp" ;;
 esac
+resolved=$(realpath -m -- "$hypr_dir")
+case $resolved in
+  /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*) die "hypr dir resolves to shared tmp $resolved" ;;
+esac
 
 mkdir -p -- "$hypr_dir"
 dest=$hypr_dir/camy.lua

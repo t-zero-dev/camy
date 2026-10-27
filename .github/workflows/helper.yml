@@ -43,6 +43,8 @@ jobs:
           cargo test --manifest-path helper/Cargo.toml --locked
           bash tests/fetch-helper.sh
           bash tests/install-window-rules.sh
+          bash tests/write-desktop-entry.sh
+          bash tests/run-ensure.sh
   native-arm:
     name: Platform aarch64
     uses: ./.github/workflows/native.yml
