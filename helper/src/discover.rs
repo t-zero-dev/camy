@@ -240,7 +240,10 @@ fn list_videos(v4l_root: &Path) -> Vec<VideoNode> {
     for ent in rd.flatten() {
         let name = ent.file_name().to_string_lossy().into_owned();
         if !name.starts_with("video")
-            || !name.as_bytes().get(5..).is_some_and(|r| !r.is_empty() && r.iter().all(u8::is_ascii_digit))
+            || !name
+                .as_bytes()
+                .get(5..)
+                .is_some_and(|r| !r.is_empty() && r.iter().all(u8::is_ascii_digit))
         {
             continue;
         }

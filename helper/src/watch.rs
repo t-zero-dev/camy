@@ -15,7 +15,6 @@ const MAX_SLOT_FILE: usize = 64;
 const GET_RPC_TIMEOUT: Duration = Duration::from_millis(400);
 const SET_RPC_TIMEOUT: Duration = Duration::from_millis(2500);
 
-use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use camy::client::Client;
 use camy::cmd::Cmd;
 use camy::discover::{self, Discovery, Inventory, Model};
@@ -24,6 +23,7 @@ use camy::pb;
 use camy::preview::{self, Preview};
 use camy::usbwatch::PlugWatch;
 use camy::{Error, Result};
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 
 use super::{connect_watch, ctl_path, emit};
 
@@ -1052,7 +1052,9 @@ fn dispatch(
                 if name == "peek" {
                     write_peek(cid, msg.resp_code, &value);
                 }
-                let resp = if name == "image-version" && msg.resp_code == 100 && matches!(body, RpcBody::Get)
+                let resp = if name == "image-version"
+                    && msg.resp_code == 100
+                    && matches!(body, RpcBody::Get)
                 {
                     0
                 } else {
@@ -1203,8 +1205,8 @@ fn drain_preview(s: &mut Session) {
             } else {
                 p.dir.join("preview-b.jpg")
             };
-            let covered = read_small(&p.dir.join("covered"), MAX_SLOT_FILE)
-                .is_some_and(|s| s.trim() == "1");
+            let covered =
+                read_small(&p.dir.join("covered"), MAX_SLOT_FILE).is_some_and(|s| s.trim() == "1");
             emit_cam(
                 &s.disc,
                 serde_json::json!({"event":"frame","slot": slot.trim(), "path": file, "covered": covered}),
@@ -1380,8 +1382,8 @@ fn json_norm_rect(v: &serde_json::Value) -> Result<pb::RectF> {
 #[cfg(test)]
 mod tests {
     use super::{Fill, RpcBody};
-    use std::time::{Duration, Instant};
     use camy::params::{self, Kind, SetPayload};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn refresh_queues_open_tab_only() {
@@ -1541,11 +1543,9 @@ mod tests {
         assert_eq!(RpcBody::Get.rpc_timeout(), super::GET_RPC_TIMEOUT);
         assert!(super::SET_RPC_TIMEOUT > super::GET_RPC_TIMEOUT);
         assert_eq!(RpcBody::Set(SetPayload::Int(9)).set_wire(), Some(9));
-        assert!(
-            RpcBody::Set(SetPayload::Rect(camy::pb::RectF::default()))
-                .set_wire()
-                .is_none()
-        );
+        assert!(RpcBody::Set(SetPayload::Rect(camy::pb::RectF::default()))
+            .set_wire()
+            .is_none());
         assert!(RpcBody::Get.set_rect().is_none());
     }
 }

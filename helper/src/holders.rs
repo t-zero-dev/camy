@@ -127,10 +127,7 @@ fn proc_comm(pid: u32) -> String {
     };
     let mut buf = [0u8; 64];
     let n = f.read(&mut buf).unwrap_or(0);
-    clip(
-        &String::from_utf8_lossy(&buf[..n]),
-        MAX_COMM,
-    )
+    clip(&String::from_utf8_lossy(&buf[..n]), MAX_COMM)
 }
 
 fn proc_cmdline(pid: u32) -> String {

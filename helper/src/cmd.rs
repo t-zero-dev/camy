@@ -103,7 +103,8 @@ mod tests {
             Cmd::parse(&json!({"cmd": "set", "name": "color-style", "value": "1"})).unwrap_err();
         assert!(err.to_string().contains("unknown color-style"));
         assert!(Cmd::parse(&json!({"cmd": "set", "name": "focus-enhance", "value": "1"})).is_err());
-        let ver = Cmd::parse(&json!({"cmd": "set", "name": "image-version", "value": "v1"})).unwrap();
+        let ver =
+            Cmd::parse(&json!({"cmd": "set", "name": "image-version", "value": "v1"})).unwrap();
         assert_eq!(
             ver,
             Cmd::Set {

@@ -218,9 +218,7 @@ pub fn runtime_dir() -> PathBuf {
     let xdg = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     let state = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state"))
-        });
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")));
     let chosen = choose_runtime_dir(xdg.as_deref(), state.as_deref(), uid);
     if let Some(parent) = chosen.parent() {
         if parent_is_safe(parent, uid) {
@@ -586,15 +584,10 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
                     let covered = dark_streak >= COVER_STREAK;
                     if covered != last_covered {
                         last_covered = covered;
-                        let _ = write_private(
-                            dir.join("covered"),
-                            if covered { b"1" } else { b"0" },
-                        );
+                        let _ =
+                            write_private(dir.join("covered"), if covered { b"1" } else { b"0" });
                     }
-                    let _ = write_private(
-                        dir.join("slot"),
-                        if slot == 0 { b"a" } else { b"b" },
-                    );
+                    let _ = write_private(dir.join("slot"), if slot == 0 { b"a" } else { b"b" });
                     slot ^= 1;
                     last = Instant::now();
                 }
@@ -748,11 +741,7 @@ mod tests {
 
     #[test]
     fn rejects_tmp_xdg() {
-        let p = choose_runtime_dir(
-            Some(Path::new("/tmp")),
-            Some(Path::new("/var/tmp")),
-            1000,
-        );
+        let p = choose_runtime_dir(Some(Path::new("/tmp")), Some(Path::new("/var/tmp")), 1000);
         assert_eq!(p, PathBuf::from("/run/user/1000/camy"));
         let p = choose_runtime_dir(Some(Path::new("/dev/shm/run")), None, 9);
         assert_eq!(p, PathBuf::from("/run/user/9/camy"));
