@@ -184,7 +184,7 @@ impl Preview {
             .name("camy-preview".into())
             .spawn(move || {
                 if let Err(e) = run(fd, width, height, &dir2, &stop2) {
-                    let _ = write_private(dir2.join("error"), e.to_string().as_bytes());
+                    let _ = write_private(&dir2.join("error"), e.to_string().as_bytes());
                 }
             })
             .map_err(|e| Error::io_ctx(e, "preview thread"))?;
@@ -310,11 +310,9 @@ pub fn harden_runtime_tree() -> Result<()> {
                     for f in inner.flatten() {
                         let fp = f.path();
                         let name = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        if name.starts_with("preview-") && name.ends_with(".jpg")
-                            || name == "covered"
-                            || name == "slot"
-                            || name == "error"
-                        {
+                        let preview_jpeg = name.starts_with("preview-")
+                            && fp.extension().is_some_and(|ext| ext == "jpg");
+                        if preview_jpeg || name == "covered" || name == "slot" || name == "error" {
                             let _ = restrict_mode(&fp, 0o600);
                         }
                     }
@@ -325,14 +323,14 @@ pub fn harden_runtime_tree() -> Result<()> {
     Ok(())
 }
 
-fn write_private(path: PathBuf, bytes: &[u8]) -> std::io::Result<()> {
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut f = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
+        .open(path)?;
     f.write_all(bytes)
 }
 
@@ -386,9 +384,8 @@ pub(crate) fn choose_runtime_dir(xdg: Option<&Path>, state: Option<&Path>, uid: 
 /// V4L2 capture nodes only. USB names must not become arbitrary paths
 /// (Omarchy #8129 class: do not execute or open attacker-shaped device names).
 pub fn is_v4l_capture(path: &str) -> bool {
-    let rest = match path.strip_prefix("/dev/video") {
-        Some(r) => r,
-        None => return false,
+    let Some(rest) = path.strip_prefix("/dev/video") else {
+        return false;
     };
     !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
 }
@@ -521,7 +518,7 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
     let mut retried = false;
     let mut deadline = Instant::now() + Duration::from_secs(5);
     let wait = PollTimeout::try_from(Duration::from_millis(200)).unwrap_or(PollTimeout::ZERO);
-    let _ = write_private(dir.join("covered"), b"0");
+    let _ = write_private(&dir.join("covered"), b"0");
     while !stop.load(Ordering::Relaxed) {
         let mut pfds = [PollFd::new(file, PollFlags::POLLIN)];
         let _ = poll(&mut pfds, wait);
@@ -585,9 +582,9 @@ fn run(fd: i32, width: u32, height: u32, dir: &Path, stop: &AtomicBool) -> Resul
                     if covered != last_covered {
                         last_covered = covered;
                         let _ =
-                            write_private(dir.join("covered"), if covered { b"1" } else { b"0" });
+                            write_private(&dir.join("covered"), if covered { b"1" } else { b"0" });
                     }
-                    let _ = write_private(dir.join("slot"), if slot == 0 { b"a" } else { b"b" });
+                    let _ = write_private(&dir.join("slot"), if slot == 0 { b"a" } else { b"b" });
                     slot ^= 1;
                     last = Instant::now();
                 }

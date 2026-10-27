@@ -150,7 +150,7 @@ mod tests {
         frame[last_payload] ^= 0xff;
         let mut buf = frame;
         let payloads = drain(&mut buf).unwrap();
-        assert!(payloads.is_empty());
+        assert_eq!(payloads.len(), 0);
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod tests {
         let frame = wrap_message(&pb::request(1, 7));
         let mut buf = frame[..12].to_vec();
         let payloads = drain(&mut buf).unwrap();
-        assert!(payloads.is_empty());
+        assert_eq!(payloads.len(), 0);
         assert_eq!(buf.len(), 12);
     }
 }

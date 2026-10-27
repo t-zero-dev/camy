@@ -38,7 +38,7 @@ pub fn restart_control(ip: &str, port: u16) -> Result<()> {
     #[cfg(not(feature = "recover"))]
     {
         let _ = (ip, port);
-        return Err(Error::Invalid("recover is disabled".into()));
+        Err(Error::Invalid("recover is disabled".into()))
     }
     #[cfg(feature = "recover")]
     {

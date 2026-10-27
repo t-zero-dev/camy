@@ -771,7 +771,7 @@ mod tests {
     #[test]
     fn refresh_order_is_tab_only() {
         let image = super::refresh_order("image");
-        assert!(!image.is_empty());
+        assert_ne!(image.len(), 0);
         assert!(image.iter().all(|&i| super::PARAMS[i].group == "image"));
         assert!(image.iter().all(|&i| !matches!(
             super::PARAMS[i].kind,

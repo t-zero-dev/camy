@@ -1166,7 +1166,7 @@ fn peer_is_self(stream: &UnixStream) -> bool {
             libc::SOL_SOCKET,
             libc::SO_PEERCRED,
             std::ptr::from_mut(&mut cred).cast(),
-            &mut len,
+            &raw mut len,
         )
     };
     rc == 0 && cred.uid == unsafe { libc::getuid() }
@@ -1180,7 +1180,7 @@ fn read_cmd_line(input: &mut impl BufRead, line: &mut String) -> io::Result<usiz
         return Ok(0);
     }
     if buf.len() > MAX_CMD_LINE {
-        if !buf.ends_with(&[b'\n']) {
+        if !buf.ends_with(b"\n") {
             let mut rest = Vec::new();
             let _ = input.read_until(b'\n', &mut rest);
         }

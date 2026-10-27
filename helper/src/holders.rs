@@ -121,9 +121,8 @@ fn holds_device(fd_dir: &Path, device: &str, want: u64) -> bool {
 }
 
 fn proc_comm(pid: u32) -> String {
-    let mut f = match fs::File::open(format!("/proc/{pid}/comm")) {
-        Ok(f) => f,
-        Err(_) => return String::new(),
+    let Ok(mut f) = fs::File::open(format!("/proc/{pid}/comm")) else {
+        return String::new();
     };
     let mut buf = [0u8; 64];
     let n = f.read(&mut buf).unwrap_or(0);
@@ -201,14 +200,13 @@ fn related_text(pid: u32, windows: &[HyprWin]) -> String {
 }
 
 fn hypr_windows() -> Vec<HyprWin> {
-    let mut child = match Command::new("/usr/bin/hyprctl")
+    let Ok(mut child) = Command::new("/usr/bin/hyprctl")
         .args(["clients", "-j"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-    {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
+    else {
+        return Vec::new();
     };
     let mut buf = Vec::new();
     if let Some(mut stdout) = child.stdout.take() {
@@ -442,6 +440,6 @@ mod tests {
         }
         let h = super::summarize(path);
         assert_ne!(h.name, "another app", "{h:?}");
-        assert!(!h.name.is_empty());
+        assert_ne!(h.name, "");
     }
 }
