@@ -4,7 +4,8 @@ One Omarchy plugin, one helper process, at most two camera sessions.
 
 ```
 Omarchy shell
-  Service.qml  ── spawns ──►  bin/camy watch
+  Service.qml  ── run.sh --ensure ──►  ~/.local/share/camy/bin/camy
+               ── spawns ──►  camy watch
   Panel.qml    ── JSON  ──►  stdin / $XDG_RUNTIME_DIR/camy/ctl.sock
        ▲                         │
        └── JSON-lines events ────┘
@@ -24,19 +25,21 @@ Omarchy shell
 | `Service.qml` | Long-lived `Process` running `watch`; applies events into panel state |
 | `Panel.qml` | Summoned FloatingWindow titled CamY |
 | `Model.js` | Shared labels, zoom/EV/shutter formatting |
-| `bin/camy` | Release helper |
+| `bin/camy` | Checkout helper (gitignored) |
+| `helper/release.pin` | Pinned GitHub Release |
+| `run.sh` | Bootstrap: local binary or fetch |
 | `helper/` | Rust crate (MIT) |
 
-The shell hot-reloads QML under `~/.config/omarchy/plugins/` on save. Replacing `bin/camy` takes effect when watch restarts (the service relaunches it after exit).
+The shell hot-reloads QML under `~/.config/omarchy/plugins/` on save. Replacing the helper takes effect when watch restarts (the service relaunches it after exit).
 
 ## Watch
 
-`camy watch` polls, in one thread:
+`camy watch` listens, in one thread:
 
 - camera TCP (S7 and/or S3)
 - Unix `ctl.sock`
 - stdin
-- inotify on `/dev` and USB/net/video sysfs (with a timer fallback)
+- NETLINK_KOBJECT_UEVENT (udev's channel); inotify fallback; 800ms poll only if both fail
 
 Each session has its own TCP client, fill cursor, heartbeat, and optional preview. Commands without `model` / `id` go to the **selected** camera (S7 if both just appeared).
 
@@ -79,4 +82,4 @@ Glyph code is internal inventory: 0 none, 3 S3, 7 S7, 10 both. The bar draws col
 | `recover` | Telnet restart of `live_camera_app` |
 | `holders` | Who has the UVC node open |
 
-Build with `scripts/build-helper.sh` so `CARGO_TARGET_DIR` is `${XDG_CACHE_HOME:-$HOME/.cache}/camy/target`, outside the plugin tree. Clippy: `deny(clippy::all)`, `warn(clippy::pedantic)`.
+Marketplace installs fetch the pinned helper into `$XDG_DATA_HOME/camy/bin`. Checkouts with Rust still use `scripts/build-helper.sh` so `CARGO_TARGET_DIR` is `${XDG_CACHE_HOME:-$HOME/.cache}/camy/target`, outside the plugin tree. Clippy: `deny(clippy::all)`, `warn(clippy::pedantic)`.

@@ -14,10 +14,13 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin
 | `Service.qml` | Long-lived `camy watch`; IPC target `camy` |
 | `Panel.qml` | FloatingWindow title `CamY`, implicit size 720×1220, minimum 720×720 |
 | `Model.js` | Tab ids, zoom/EV/shutter labels |
-| `bin/camy` | Release helper (gitignored; you build it) |
+| `bin/camy` | Checkout helper (gitignored; `scripts/build-helper.sh`) |
 | `helper/` | Rust sources (crate name `camy`) |
+| `helper/release.pin` | Pinned GitHub Release tag, asset names, sha256 |
+| `run.sh` | `--ensure` / `--print-path` bootstrap |
+| `scripts/fetch-helper.sh` | Download, hash, install under `$XDG_DATA_HOME/camy/bin` |
 | `scripts/write-desktop-entry.sh` | Optional launcher entry |
-| `scripts/build-helper.sh` | Release helper into user cache, then `bin/` |
+| `scripts/build-helper.sh` | Checkout helper into user cache, then `bin/` |
 | `skills/camy/SKILL.md` | Source copy of the agent skill |
 | `docs/` | This tree |
 
@@ -122,7 +125,18 @@ The camera’s CDC interface is a `/24` used only for TCP 12345. If NetworkManag
 | `<serial>/preview-a.jpg`, `preview-b.jpg` | Ping-pong MJPEG for the panel |
 | `<serial>/slot` | Which JPEG the panel should load |
 
+| `bootstrap.log` | Why fetch/install of the pinned helper failed |
+
 These vanish at logout. They are not preferences.
+
+### Installed helper — `~/.local/share/camy/`
+
+The pinned helper lives outside the plugin tree:
+
+| Path | Role |
+| --- | --- |
+| `$XDG_DATA_HOME/camy/bin/camy` | Fetched, hash-checked helper (`~/.local/share/camy/bin/camy`) |
+| `$XDG_CACHE_HOME/camy/` | Fetch work dir and cargo target for checkout builds |
 
 ## Stored on the camera
 

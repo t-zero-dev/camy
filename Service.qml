@@ -387,10 +387,53 @@ Item {
 
 
 
-  readonly property string helperBin: Model.helperPathFromUrl(Qt.resolvedUrl("bin/camy"))
+  // Plugin bootstrap (run.sh --ensure): install the pinned helper if
+  // needed. Detached so a plugin reload mid-install cannot kill the
+  // download. A checkout with bin/camy stays offline. argv, never shell
+  // text; env -C because Quickshell cwd may be qrc:/qs-blackhole.
+  readonly property string pluginRoot: {
+    var p = Model.helperPathFromUrl(Qt.resolvedUrl("run.sh"))
+    if (p.length > 6 && p.substring(p.length - 6) === "run.sh")
+      return p.substring(0, p.length - 7)
+    return p
+  }
+  readonly property string runtimeDir: {
+    var r = Quickshell.env("XDG_RUNTIME_DIR") || ""
+    if (r.length && r.indexOf("/tmp") !== 0 && r.indexOf("/var/tmp") !== 0 && r.indexOf("/dev/shm") !== 0)
+      return r + "/camy"
+    var s = Quickshell.env("XDG_STATE_HOME") || ""
+    if (s.length)
+      return s + "/camy"
+    return (Quickshell.env("HOME") || "") + "/.local/state/camy"
+  }
+  readonly property string bootstrapLog: runtimeDir + "/bootstrap.log"
+  property string helperBin: ""
+  property string loadedVersion: ""
+  property string installedVersion: ""
+  readonly property bool updatePending: !!loadedVersion && !!installedVersion && installedVersion !== loadedVersion
+
+  function bootstrap() {
+    if (!active) return
+    var home = Quickshell.env("HOME") || ""
+    if (!home) return
+    Quickshell.execDetached(["env", "-C", home, "CAMY_BOOTSTRAP_LOG=" + bootstrapLog, "bash", pluginRoot + "/run.sh", "--ensure"])
+    resolveHelper()
+  }
+
+  function resolveHelper() {
+    if (resolveProcess.running) return
+    var home = Quickshell.env("HOME") || ""
+    if (!home) return
+    resolveProcess.command = ["env", "-C", home, "CAMY_BOOTSTRAP_LOG=" + bootstrapLog, "bash", pluginRoot + "/run.sh", "--print-path"]
+    resolveProcess.running = true
+  }
 
   function startWatch() {
     if (!active || watchProcess.running) return
+    if (!helperBin) {
+      bootstrap()
+      return
+    }
     watchProcess.command = [helperBin, "watch"]
     watchProcess.running = true
   }
@@ -402,6 +445,56 @@ Item {
   Component.onCompleted: startWatch()
   Component.onDestruction: stopWatch()
   onActiveChanged: active ? startWatch() : stopWatch()
+
+  Process {
+    id: resolveProcess
+    running: false
+    stdout: StdioCollector { waitForEnd: true }
+    onExited: function (exitCode) {
+      if (exitCode === 0) {
+        var p = String(stdout.text || "").trim()
+        if (p.charAt(0) === "/" && p.indexOf("\n") === -1) {
+          root.helperBin = p
+          root.startWatch()
+          return
+        }
+      }
+      bootstrapRetry.restart()
+    }
+  }
+
+  Timer {
+    id: bootstrapRetry
+    interval: 20000
+    repeat: false
+    onTriggered: root.bootstrap()
+  }
+
+  FileView {
+    path: root.bootstrapLog
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      var lines = String(text() || "").trim().split("\n")
+      if (watchProcess.running || !lines.length) return
+      root.lastError = Model.plain(lines[lines.length - 1], Model.MAX_ERROR)
+    }
+  }
+
+  FileView {
+    path: root.pluginRoot + "/manifest.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      var version = ""
+      try { version = String(JSON.parse(text()).version || "") } catch (e) { return }
+      if (!version) return
+      if (!root.loadedVersion) root.loadedVersion = version
+      root.installedVersion = version
+    }
+  }
 
   Process {
     id: watchProcess

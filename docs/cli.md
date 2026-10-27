@@ -1,12 +1,11 @@
 # Helper CLI
 
-`bin/camy` talks to a docked S7 or S3 over the Yunxi control port. The CamY service runs `camy watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
+`camy` talks to a docked S7 or S3 over the Yunxi control port. The CamY service runs `camy watch` and **owns** TCP 12345. One-shot commands that open their own socket (`get`, `set`, `probe`, `get-all`, firmware `status`) fail or wedge the camera if watch is already connected.
 
 Use `camy ctl` or `omarchy-shell camy …` against a running watch. Close the window / stop the service before a second TCP client.
 
 ```bash
-PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
-BIN="$PLUGIN/bin/camy"
+BIN="${XDG_DATA_HOME:-$HOME/.local/share}/camy/bin/camy"
 $BIN help
 ```
 

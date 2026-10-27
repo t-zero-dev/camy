@@ -7,5 +7,6 @@
 | [Protocol](protocol.md) | Control channel, named parameters, S7 vs S3 |
 | [Architecture](architecture.md) | How the plugin and helper fit together |
 | [Troubleshooting](troubleshooting.md) | UVC busy, mixed dock, gadget route |
+| [Releasing](RELEASING.md) | Helper tags, pin, plugin tags |
 
 The product overview and install steps live in the [README](../README.md).

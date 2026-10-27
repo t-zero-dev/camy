@@ -42,13 +42,17 @@ The kernel must bind `46f8:0851` (or `0855`). HDMI out without the USB 3 **data*
 
 Only named parameters are SET. CID 55, 58, and 29 are not in that table; writing them has rebooted an S7. If a fork adds a CID, probe with GET first and never SET an undocumented integer on the S7.
 
-## Build / enable
+## Helper did not install
+
+`$XDG_RUNTIME_DIR/camy/bootstrap.log` is the fetch stderr. Opening CamY again retries. A sha256 mismatch means the committed pin and the GitHub asset disagree; the download is refused.
+
+From a checkout with Rust:
 
 ```bash
 PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
 export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/camy/target"
 cd "$PLUGIN/helper"
-cargo test
+cargo test --locked
 cd "$PLUGIN"
 bash scripts/build-helper.sh
 omarchy plugin validate "$PLUGIN"

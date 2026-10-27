@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.t-zero-dev.camy",
   "name": "CamY",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "t-zero-dev",
   "license": "MIT",
   "description": "Unofficial Omarchy panel for YoloLiv YoloCam S7 and S3 — exposure, focus, zoom, and a live preview.",

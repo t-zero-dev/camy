@@ -6,28 +6,19 @@ CamY is not affiliated with, endorsed by, or sponsored by YoloLiv Inc. YoloCam, 
 
 ![CamY overview: S7 and S3 side by side](docs/camy-combined.png)
 
-This page is the user guide for installation, first run, and everyday use. Helper build instructions and control-channel parameters live in [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/protocol.md](docs/protocol.md).
+This page is the user guide for installation, first run, and everyday use. How the helper is built and released lives in [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/RELEASING.md](docs/RELEASING.md). Control-channel parameters live in [docs/protocol.md](docs/protocol.md).
 
 Firmware flashing, CLUT colour-wheel upload, and YoloLiv remote assistance are out of scope for now.
 
 ## Install
 
-Omarchy 4. Needs [Rust](https://rustup.rs/) to build the helper once. Plugins run unsandboxed inside `omarchy-shell`; read the code before you enable it.
+Omarchy 4 on x86_64 and aarch64. Plugins run unsandboxed inside `omarchy-shell`; read the code before you enable it.
 
 ```sh
 omarchy plugin add https://github.com/t-zero-dev/camy.git --enable
 ```
 
-That clones into `~/.config/omarchy/plugins/io.github.t-zero-dev.camy` and enables the **service** (USB + control) and the **window**. Open from **Apps → CamY**.
-
-Then build the helper. Cargo’s `target/` must stay **outside** the plugin tree — `omarchy plugin validate` rejects symlinks — and must be a directory you own, not shared `/tmp`:
-
-```sh
-bash ~/.config/omarchy/plugins/io.github.t-zero-dev.camy/scripts/build-helper.sh
-omarchy restart shell
-```
-
-The script builds into `${XDG_CACHE_HOME:-$HOME/.cache}/camy/target` (mode 700), checks that the cargo output is a user-owned regular file, then installs with `*.new` then `mv -f` so a running helper is not overwritten (`ETXTBSY`). The crate name in `helper/Cargo.toml` is the installed binary name.
+That clones the plugin, enables the **service** (USB + control) and the **window**, and on first open downloads the pinned helper from GitHub Releases, checks its sha256, and installs it under `~/.local/share/camy/bin`. Open from **Apps → CamY**.
 
 Optional: list CamY in the Omarchy menu:
 
@@ -132,7 +123,7 @@ The service runs `camy watch` and **owns** TCP 12345. While the plugin is enable
 
 ```sh
 PLUGIN=~/.config/omarchy/plugins/io.github.t-zero-dev.camy
-BIN="$PLUGIN/bin/camy"
+BIN="${XDG_DATA_HOME:-$HOME/.local/share}/camy/bin/camy"
 ```
 
 Read state from the shell (JSON: `usb`, `control`, `values`, `selected`, …):
@@ -201,11 +192,10 @@ See [docs/configuration.md](docs/configuration.md) for the Hyprland rules, the d
 
 ```sh
 omarchy plugin update io.github.t-zero-dev.camy
-# rebuild helper/ if the Rust sources changed
 omarchy restart shell
 ```
 
-Until the restart, the shell keeps what it loaded at login. Saving `Panel.qml` can log a plugin reload while the open window still shows the previous QML — restart the shell, then reopen from Apps.
+Until the restart, the shell keeps running what it loaded at login, old helper pin included. Saving `Panel.qml` can log a plugin reload while the open window still shows the previous QML — restart the shell, then reopen from Apps.
 
 ## If something is wrong
 
@@ -219,7 +209,7 @@ Meet as a background Chromium tab is named Chromium, not Google Meet.
 
 S3 preview can take several seconds on STREAMON. Wait before clicking again.
 
-Logs and the control socket live under `$XDG_RUNTIME_DIR/camy/` (usually `/run/user/<uid>/camy/`).
+The helper is one process started by the service. Its log and the control socket live under `$XDG_RUNTIME_DIR/camy/` (usually `/run/user/<uid>/camy/`). If the helper could not be installed, the reason is `bootstrap.log` in the same directory; opening CamY again retries.
 
 More cases (UVC busy, mixed dock, gadget as default route): [docs/troubleshooting.md](docs/troubleshooting.md).
 
@@ -227,6 +217,7 @@ More cases (UVC busy, mixed dock, gadget as default route): [docs/troubleshootin
 
 ```sh
 omarchy plugin remove io.github.t-zero-dev.camy
+rm -rf ~/.local/share/camy ~/.cache/camy
 rm -f ~/.local/share/applications/camy.desktop
 rm -rf ~/.grok/skills/camy ~/.agents/skills/camy
 ```
