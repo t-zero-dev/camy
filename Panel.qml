@@ -121,18 +121,30 @@ Item {
   }
 
   function placeWindow() {
-    var mon = Hyprland.focusedMonitor
-    var ipc = mon && mon.lastIpcObject ? mon.lastIpcObject : null
-    var scale = ipc && ipc.scale ? Number(ipc.scale) : 1
-    if (!(scale > 0)) scale = 1
-    var ph = ipc && ipc.height ? Number(ipc.height) : (mon ? Number(mon.height) : 0)
-    var logicalH = ph > 0 ? Math.floor(ph / scale) : 1220
-    var h = Math.min(1220, Math.floor(logicalH * 0.90))
-    if (h < 720) h = 720
-    var sel = "title:^CamY$"
-    Hyprland.dispatch('hl.dsp.window.float({ action = "set", window = "' + sel + '" })')
-    Hyprland.dispatch('hl.dsp.window.resize({ x = 720, y = ' + h + ', window = "' + sel + '" })')
-    Hyprland.dispatch('hl.dsp.window.center({ window = "' + sel + '" })')
+    var h = 1220
+    try {
+      var mon = Hyprland.focusedMonitor
+      var ipc = mon && mon.lastIpcObject ? mon.lastIpcObject : null
+      var scale = ipc && ipc.scale ? Number(ipc.scale) : (mon && mon.scale ? Number(mon.scale) : 1)
+      if (!(scale > 0)) scale = 1
+      var ph = ipc && ipc.height ? Number(ipc.height) : (mon ? Number(mon.height) : 0)
+      if (ph > 0) {
+        h = Math.min(1220, Math.floor(Math.floor(ph / scale) * 0.90))
+        if (h < 720) h = 720
+      }
+    } catch (e) {}
+    var script = Model.helperPathFromUrl(Qt.resolvedUrl("scripts/place-window.sh"))
+    if (!script) return
+    var sig = Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
+    var runtime = Quickshell.env("XDG_RUNTIME_DIR") || ""
+    if (placeProc.running) placeProc.running = false
+    placeProc.command = [
+      "/usr/bin/env",
+      "HYPRLAND_INSTANCE_SIGNATURE=" + sig,
+      "XDG_RUNTIME_DIR=" + runtime,
+      "/usr/bin/bash", script, String(h)
+    ]
+    placeProc.running = true
   }
 
   function open(payloadJson) {
@@ -141,7 +153,7 @@ Item {
     Qt.callLater(function() {
       if (root.opened && keyCatcher) keyCatcher.forceActiveFocus()
     })
-    placeRetry.restart()
+    startPlace()
   }
 
   function close() {
@@ -160,11 +172,38 @@ Item {
     else close()
   }
 
+  function startPlace() {
+    placeRetry.ticks = 0
+    placeRetry.restart()
+    latePlace.restart()
+  }
+
   Timer {
     id: placeRetry
-    interval: 50
+    interval: 250
+    repeat: true
+    triggeredOnStart: true
+    property int ticks: 0
+    onTriggered: {
+      root.placeWindow()
+      ticks += 1
+      if (ticks >= 4) {
+        stop()
+        ticks = 0
+      }
+    }
+  }
+
+  Timer {
+    id: latePlace
+    interval: 1600
     repeat: false
     onTriggered: root.placeWindow()
+  }
+
+  Process {
+    id: placeProc
+    running: false
   }
 
   function switchPanel(_direction) {}
@@ -476,7 +515,7 @@ Item {
       if (visible) {
         root.opened = true
         Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
-        root.placeRetry.restart()
+        root.startPlace()
         return
       }
       root.opened = false

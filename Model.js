@@ -15,6 +15,7 @@ var MAX_ERROR = 200
 function helperPathFromUrl(url) {
   var s = String(url || "")
   if (s.indexOf("file://") === 0) s = s.substring(7)
+  else if (s.indexOf("qs://") === 0) s = s.substring(5)
   return s
 }
 

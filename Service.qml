@@ -408,6 +408,7 @@ Item {
   }
   readonly property string bootstrapLog: runtimeDir + "/bootstrap.log"
   property string helperBin: ""
+  property bool watchSawStart: false
   property string loadedVersion: ""
   property string installedVersion: ""
   readonly property bool updatePending: !!loadedVersion && !!installedVersion && installedVersion !== loadedVersion
@@ -442,7 +443,10 @@ Item {
     if (watchProcess.running) watchProcess.running = false
   }
 
-  Component.onCompleted: startWatch()
+  Component.onCompleted: {
+    bootstrap()
+    startWatch()
+  }
   Component.onDestruction: stopWatch()
   onActiveChanged: active ? startWatch() : stopWatch()
 
@@ -509,12 +513,23 @@ Item {
         if (text) root.lastError = Model.plain(text, Model.MAX_ERROR)
       }
     }
-    onStarted: root.flushSendQueue()
+    onStarted: {
+      root.watchSawStart = true
+      root.flushSendQueue()
+    }
     onExited: function() {
       root.connected = false
       root.control = false
       root.previewOn = false
-      if (root.active) watchRestart.restart()
+      if (!root.watchSawStart) {
+        // Stale path from a previous checkout (plugin reinstall, missing
+        // bin/camy). Drop it and fetch the pinned helper.
+        root.helperBin = ""
+        if (root.active) root.bootstrap()
+      } else if (root.active) {
+        watchRestart.restart()
+      }
+      root.watchSawStart = false
     }
   }
 
