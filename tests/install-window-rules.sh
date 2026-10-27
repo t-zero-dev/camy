@@ -16,10 +16,10 @@ export CAMY_HYPR_DIR=$hypr
 export CAMY_SKIP_HYPR_RELOAD=1
 bash scripts/install-window-rules.sh >/dev/null
 [[ -f $hypr/camy.lua ]] || die "did not copy camy.lua"
-grep -F -q 'title = "^CamY$"' "$hypr/camy.lua" || die "copied rules missing title"
+grep -F -q 'title = "^CamY"' "$hypr/camy.lua" || die "copied rules missing title"
 grep -F -q 'name = "camy-window"' "$hypr/camy.lua" || die "copied rules missing named window rule"
+grep -F -q 'float = true' "$hypr/camy.lua" || die "copied rules missing float"
 grep -F -q 'o.rebind("SUPER + T"' "$hypr/camy.lua" || die "copied rules missing Super+T wrap"
-grep -F -q 'action = "on"' "$hypr/camy.lua" || die "copied rules must force float with action on"
 grep -q 'camy-window-rules: begin' "$hypr/hyprland.lua" || die "did not inject require"
 grep -q 'pcall(require, "hypr.camy")' "$hypr/hyprland.lua" || die "missing pcall require"
 

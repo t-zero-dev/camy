@@ -2,8 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
-import Quickshell.Hyprland
-import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -120,40 +118,12 @@ Item {
     })
   }
 
-  function placeWindow() {
-    var h = 1220
-    try {
-      var mon = Hyprland.focusedMonitor
-      var ipc = mon && mon.lastIpcObject ? mon.lastIpcObject : null
-      var scale = ipc && ipc.scale ? Number(ipc.scale) : (mon && mon.scale ? Number(mon.scale) : 1)
-      if (!(scale > 0)) scale = 1
-      var ph = ipc && ipc.height ? Number(ipc.height) : (mon ? Number(mon.height) : 0)
-      if (ph > 0) {
-        h = Math.min(1220, Math.floor(Math.floor(ph / scale) * 0.90))
-        if (h < 720) h = 720
-      }
-    } catch (e) {}
-    var script = Model.helperPathFromUrl(Qt.resolvedUrl("scripts/place-window.sh"))
-    if (!script) return
-    var sig = Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
-    var runtime = Quickshell.env("XDG_RUNTIME_DIR") || ""
-    if (placeProc.running) placeProc.running = false
-    placeProc.command = [
-      "/usr/bin/env",
-      "HYPRLAND_INSTANCE_SIGNATURE=" + sig,
-      "XDG_RUNTIME_DIR=" + runtime,
-      "/usr/bin/bash", script, String(h)
-    ]
-    placeProc.running = true
-  }
-
   function open(payloadJson) {
     closingFromHost = false
     opened = true
     Qt.callLater(function() {
       if (root.opened && keyCatcher) keyCatcher.forceActiveFocus()
     })
-    startPlace()
   }
 
   function close() {
@@ -170,40 +140,6 @@ Item {
   function requestClose() {
     if (shell && typeof shell.hide === "function") shell.hide("io.github.t-zero-dev.camy")
     else close()
-  }
-
-  function startPlace() {
-    placeRetry.ticks = 0
-    placeRetry.restart()
-    latePlace.restart()
-  }
-
-  Timer {
-    id: placeRetry
-    interval: 250
-    repeat: true
-    triggeredOnStart: true
-    property int ticks: 0
-    onTriggered: {
-      root.placeWindow()
-      ticks += 1
-      if (ticks >= 4) {
-        stop()
-        ticks = 0
-      }
-    }
-  }
-
-  Timer {
-    id: latePlace
-    interval: 1600
-    repeat: false
-    onTriggered: root.placeWindow()
-  }
-
-  Process {
-    id: placeProc
-    running: false
   }
 
   function switchPanel(_direction) {}
@@ -515,7 +451,6 @@ Item {
       if (visible) {
         root.opened = true
         Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
-        root.startPlace()
         return
       }
       root.opened = false

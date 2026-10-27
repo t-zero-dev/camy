@@ -26,7 +26,7 @@ Cloned to `~/.config/omarchy/plugins/io.github.t-zero-dev.camy`. `omarchy plugin
 | `skills/camy/SKILL.md` | Source copy of the agent skill |
 | `docs/` | This tree |
 
-`Panel.qml` sizes the window. Hyprland’s size rule applies on map; the panel also float/resize/centre on open.
+`Panel.qml` sets the implicit size. Hyprland applies float, centre, and size on map.
 
 ### Plugin settings object
 
@@ -58,7 +58,14 @@ To disable preview from config:
 
 ### Window — `~/.config/hypr/camy.lua`
 
-`run.sh --ensure` copies [hypr/camy.lua](../hypr/camy.lua) to `~/.config/hypr/camy.lua` and appends a `pcall(require, "hypr.camy")` block to `hyprland.lua` if it is missing. Title match `^CamY`, class `org.quickshell`. Do not tag CamY `+floating-window`; that size is 875×600 and would override 720×1220.
+`run.sh --ensure` copies [hypr/camy.lua](../hypr/camy.lua) to `~/.config/hypr/camy.lua` and appends a `pcall(require, "hypr.camy")` block to `hyprland.lua` if it is missing. Title match `^CamY`, class `org.quickshell`. Omarchy’s `+floating-window` tag is 875×600 and would override this size.
+
+```lua
+o.window({ title = "^CamY" }, { name = "camy-window", float = true })
+o.window({ title = "^CamY" }, { name = "camy-center", center = true })
+o.window({ title = "^CamY" }, { name = "camy-size", size = "720 min(1220, monitor_h*0.90)" })
+o.window({ title = "^CamY" }, { name = "camy-suppress", suppress_event = "fullscreen maximize" })
+```
 
 | Rule | Why |
 | --- | --- |
@@ -67,8 +74,6 @@ To disable preview from config:
 | `size` | Width 720. Height 1220 on a tall dock, 90% of logical `monitor_h` on a short laptop. |
 | `suppress_event` | Fullscreen and maximize are ignored. Resize by edges remains. |
 | Super+T | Other windows still toggle tile. CamY only recentres. |
-
-The panel also float/resize/centre on open so the first frame is right before Hyprland reloads.
 
 ### Keybind — `~/.config/hypr/bindings.lua`
 
