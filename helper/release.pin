@@ -1,8 +1,7 @@
-# Candidate pin for helper-0.2.0. Replace with
-# `bash scripts/release.sh helper pin helper-0.2.0` after the public
-# GitHub Release exists (docs/RELEASING.md). Ubuntu CI hashes will
-# differ; aarch64 is filled then.
+# Verified public helper release; update through scripts/release.sh helper pin.
 tag=helper-0.2.0
 repo=t-zero-dev/camy
 asset_x86_64=camy-helper-x86_64-unknown-linux-gnu
-sha256_x86_64=149b1c5ac857fb571df0fd27d3bfb334092bd5d7502b1fd862fa1be37bd02f24
+sha256_x86_64=73699d60ea94922e9ec2cd1e229fa886d4a68c84b3cf7a41d7af0ae1fee20c0f
+asset_aarch64=camy-helper-aarch64-unknown-linux-gnu
+sha256_aarch64=ff1248a9e2cb531bd91a0e5e1264ea4b9f9eeba9928395f0e247229d33adebbc
